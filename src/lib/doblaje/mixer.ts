@@ -77,13 +77,24 @@ function getVideoDuration(videoPath: string): Promise<number> {
 
 function generateSilence(outputPath: string, duration: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    ffmpeg()
-      .input('anullsrc=r=44100:cl=stereo')
-      .inputOptions(['-f lavfi'])
-      .outputOptions([`-t ${duration}`, '-ar 44100', '-ac 2'])
-      .output(outputPath)
-      .on('end', () => resolve())
-      .on('error', reject)
-      .run()
+    const { execSync } = require('child_process')
+    try {
+      execSync(
+        `ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t ${duration} -ar 44100 -ac 2 "${outputPath}"`,
+        { stdio: 'pipe' }
+      )
+      resolve()
+    } catch {
+      // fallback: generate silence from a short sine wave stretched
+      try {
+        execSync(
+          `ffmpeg -y -f lavfi -i "sine=frequency=1:sample_rate=44100" -t ${duration} -af "volume=0" -ar 44100 -ac 2 "${outputPath}"`,
+          { stdio: 'pipe' }
+        )
+        resolve()
+      } catch (e2) {
+        reject(new Error(`Could not generate silence: ${e2}`))
+      }
+    }
   })
 }
