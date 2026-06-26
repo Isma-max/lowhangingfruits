@@ -1,35 +1,55 @@
 #!/usr/bin/env python3
 """
-Detects mouth open/close events in a video using MediaPipe Face Mesh.
+Detects mouth open/close events in a video using MediaPipe Face Landmarker.
 Outputs JSON with speaking segments (timecodes when mouth is open).
 Usage: python3 detect_mouth.py <video_path>
 """
 
 import sys
 import json
+import os
 import cv2
 import mediapipe as mp
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
 
-# MediaPipe lip landmarks (upper and lower lip center points)
 UPPER_LIP = 13
 LOWER_LIP = 14
 
+
+def get_model_path():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, 'face_landmarker.task')
+
+
+def download_model_if_needed(model_path):
+    if os.path.exists(model_path):
+        return
+    import urllib.request
+    url = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task'
+    urllib.request.urlretrieve(url, model_path)
+
+
 def detect_speaking_segments(video_path: str, threshold: float = 0.015, min_duration: float = 0.4):
-    mp_face_mesh = mp.solutions.face_mesh
-    face_mesh = mp_face_mesh.FaceMesh(
-        static_image_mode=False,
-        max_num_faces=4,
-        refine_landmarks=True,
-        min_detection_confidence=0.5,
+    model_path = get_model_path()
+    download_model_if_needed(model_path)
+
+    base_options = mp_python.BaseOptions(model_asset_path=model_path)
+    options = mp_vision.FaceLandmarkerOptions(
+        base_options=base_options,
+        num_faces=4,
+        min_face_detection_confidence=0.5,
+        min_face_presence_confidence=0.5,
         min_tracking_confidence=0.5,
     )
+    landmarker = mp_vision.FaceLandmarker.create_from_options(options)
 
     cap = cv2.VideoCapture(video_path)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration = total_frames / fps
 
-    frame_events = []  # (timestamp, is_speaking, face_index)
+    frame_events = []
 
     frame_idx = 0
     while cap.isOpened():
@@ -39,12 +59,13 @@ def detect_speaking_segments(video_path: str, threshold: float = 0.015, min_dura
 
         ts = frame_idx / fps
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = face_mesh.process(rgb)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        result = landmarker.detect(mp_image)
 
-        if results.multi_face_landmarks:
-            for face_idx, landmarks in enumerate(results.multi_face_landmarks):
-                upper = landmarks.landmark[UPPER_LIP]
-                lower = landmarks.landmark[LOWER_LIP]
+        if result.face_landmarks:
+            for face_idx, landmarks in enumerate(result.face_landmarks):
+                upper = landmarks[UPPER_LIP]
+                lower = landmarks[LOWER_LIP]
                 opening = abs(lower.y - upper.y)
                 is_open = opening > threshold
                 frame_events.append((ts, is_open, face_idx))
@@ -52,9 +73,8 @@ def detect_speaking_segments(video_path: str, threshold: float = 0.015, min_dura
         frame_idx += 1
 
     cap.release()
-    face_mesh.close()
+    landmarker.close()
 
-    # Group into speaking segments per face
     segments = []
     faces = set(e[2] for e in frame_events)
 
@@ -64,7 +84,7 @@ def detect_speaking_segments(video_path: str, threshold: float = 0.015, min_dura
         in_segment = False
         seg_start = 0.0
 
-        for i, (ts, is_open) in enumerate(face_frames):
+        for ts, is_open in face_frames:
             if is_open and not in_segment:
                 in_segment = True
                 seg_start = ts
@@ -89,10 +109,7 @@ def detect_speaking_segments(video_path: str, threshold: float = 0.015, min_dura
                     "duration": round(seg_end - seg_start, 2),
                 })
 
-    # Sort by startTime and merge overlapping segments from different faces
     segments.sort(key=lambda s: s["startTime"])
-
-    # Limit to max 6 segments
     segments = segments[:6]
 
     print(json.dumps({
