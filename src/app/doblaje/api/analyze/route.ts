@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getJob, updateJob } from '@/lib/doblaje/store'
 import { analyzeVideo } from '@/lib/doblaje/gemini'
+import { getDemoAnalysis } from '@/lib/doblaje/demo-data'
+
+const DEMO_MODE = process.env.GEMINI_API_KEY === 'demo' || !process.env.GEMINI_API_KEY
 
 export async function POST(req: NextRequest) {
   const { jobId } = await req.json()
@@ -11,7 +14,8 @@ export async function POST(req: NextRequest) {
   updateJob(jobId, { status: 'analyzing', progress: 10 })
 
   try {
-    const analysis = await analyzeVideo(job.videoPath)
+    const analysis = DEMO_MODE ? getDemoAnalysis() : await analyzeVideo(job.videoPath)
+
     updateJob(jobId, {
       status: 'generating',
       progress: 40,

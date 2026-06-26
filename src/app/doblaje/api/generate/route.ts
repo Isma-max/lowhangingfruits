@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getJob, updateJob } from '@/lib/doblaje/store'
 import { generateScriptOptions } from '@/lib/doblaje/scriptgen'
+import { getDemoScriptOptions } from '@/lib/doblaje/demo-data'
+
+const DEMO_MODE = process.env.GEMINI_API_KEY === 'demo' || !process.env.GEMINI_API_KEY
 
 export async function POST(req: NextRequest) {
   const { jobId } = await req.json()
@@ -11,7 +14,17 @@ export async function POST(req: NextRequest) {
   updateJob(jobId, { progress: 50 })
 
   try {
-    const scriptOptions = await generateScriptOptions(job.segments, job.speakers)
+    let scriptOptions
+    if (DEMO_MODE) {
+      const demoOptions = getDemoScriptOptions()
+      scriptOptions = job.segments.map((seg, i) =>
+        (demoOptions[i] || demoOptions[0]).map((opt) => ({ ...opt, segmentId: seg.id }))
+      )
+      await new Promise((r) => setTimeout(r, 1000))
+    } else {
+      scriptOptions = await generateScriptOptions(job.segments, job.speakers)
+    }
+
     updateJob(jobId, { progress: 70, scriptOptions })
     return NextResponse.json({ scriptOptions })
   } catch (err) {
