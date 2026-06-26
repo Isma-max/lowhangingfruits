@@ -82,9 +82,19 @@ export async function analyzeAndGenerateWithVision(videoPath: string): Promise<V
     messages: [
       {
         role: 'system',
-        content: `Eres un doblajista paródico chileno. MediaPipe detectó exactamente cuándo hay boca abierta en el video.
-Tu trabajo es INVENTAR lo que podrían estar diciendo en esos momentos — absurdo, irreverente, en español chileno.
-NO intentes adivinar lo que realmente dicen. INVENTA algo completamente diferente y gracioso.`,
+        content: `Eres un doblajista paródico chileno experto en fonética visual (visemas).
+
+REGLAS DE VISEMAS — úsalas para que el texto inventado calce con los movimientos de boca:
+- Labios JUNTOS/CERRADOS → palabras que empiezan con B, P, M (ej: "pero", "mira", "bien")
+- Labios REDONDEADOS → palabras con O, U (ej: "todo", "weon", "po")
+- Boca MUY ABIERTA → palabras con A fuerte (ej: "la raja", "bacán", "aah")
+- Boca ESTIRADA horizontal → palabras con E, I (ej: "si", "mierda", "eso")
+- Dientes VISIBLES → F, V, S (ej: "filo", "vai a ver", "si po")
+- Boca APENAS ABIERTA → consonantes suaves, murmullos
+
+Cuando veas la imagen del frame, fíjate en la FORMA exacta de la boca y elige palabras cuya primera sílaba tenga el visema correspondiente.
+
+Tu trabajo es INVENTAR diálogo absurdo en chileno que calce con lo que ves en los labios.`,
       },
       {
         role: 'user',
@@ -95,20 +105,26 @@ NO intentes adivinar lo que realmente dicen. INVENTA algo completamente diferent
             text: `Video deportivo de ${duration.toFixed(1)}s. MediaPipe detectó ${rawSegments.length} momentos donde alguien habla.
 Los timecodes YA ESTÁN DEFINIDOS — NO los cambies.
 
-Para cada segmento inventa 3 versiones de doblaje en CHILENO con actitud:
-- sutil: levemente cómico, con chilenismos suaves
-- exagerado: muy dramático y exagerado, más chilenismos
-- absurdo: completamente ridículo e inesperado, máximo garabatos si aplica
+Para cada segmento:
+1. Describe la FORMA EXACTA de la boca en el frame (labios juntos, redondeados, abiertos, etc)
+2. Basándote en esa forma, elige palabras cuya fonética calce con el visema
+3. Inventa 3 versiones de doblaje en CHILENO con actitud
+
+Versiones:
+- sutil: levemente cómico, chilenismos suaves, fonética calza con labios
+- exagerado: muy dramático, más chilenismos, fonética calza con labios
+- absurdo: completamente ridículo, máximo garabatos, fonética calza con labios
 
 Responde SOLO con JSON:
 {
   "segments": [
     {
       "segmentIndex": <0-based>,
-      "lipContext": "<qué ves en la imagen>",
-      "sutil": "<texto>",
-      "exagerado": "<texto>",
-      "absurdo": "<texto>"
+      "lipContext": "<forma exacta de boca que ves: labios juntos/redondeados/abiertos/etc>",
+      "viseme": "<visema detectado: B-P-M / O-U / A / E-I / F-V-S>",
+      "sutil": "<texto con fonética que calza>",
+      "exagerado": "<texto con fonética que calza>",
+      "absurdo": "<texto con fonética que calza>"
     }
   ]
 }`,
