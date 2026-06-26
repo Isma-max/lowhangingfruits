@@ -67,6 +67,9 @@ export default function StepScript({ job, onDone }: Props) {
               </div>
               <span className="text-xs px-2 py-1 bg-gray-800 rounded-full text-gray-400">{seg.emotion}</span>
             </div>
+            {seg.originalText && (
+              <p className="text-xs text-gray-600 mb-1">Original: <span className="italic">"{seg.originalText}"</span></p>
+            )}
             <p className="text-gray-500 text-sm mb-3 italic">"{seg.context}"</p>
 
             <div className="grid grid-cols-1 gap-2 mb-3">

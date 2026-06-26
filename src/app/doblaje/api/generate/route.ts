@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getJob, updateJob } from '@/lib/doblaje/store'
-import { generateScriptOptions } from '@/lib/doblaje/scriptgen'
+import { rewriteWithPhonetics } from '@/lib/doblaje/rewriter'
 import { getDemoScriptOptions } from '@/lib/doblaje/demo-data'
+import { TranscribedSegment } from '@/lib/doblaje/whisper'
 
-const DEMO_MODE = process.env.GEMINI_API_KEY === 'demo' || !process.env.GEMINI_API_KEY
+const DEMO_MODE = process.env.OPENAI_API_KEY === 'demo' || !process.env.OPENAI_API_KEY
 
 export async function POST(req: NextRequest) {
   const { jobId } = await req.json()
@@ -15,6 +16,7 @@ export async function POST(req: NextRequest) {
 
   try {
     let scriptOptions
+
     if (DEMO_MODE) {
       const demoOptions = getDemoScriptOptions()
       scriptOptions = job.segments.map((seg, i) =>
@@ -22,7 +24,15 @@ export async function POST(req: NextRequest) {
       )
       await new Promise((r) => setTimeout(r, 1000))
     } else {
-      scriptOptions = await generateScriptOptions(job.segments, job.speakers)
+      const transcribedSegments: TranscribedSegment[] = job.segments.map((seg) => ({
+        id: seg.id,
+        text: seg.originalText || seg.context,
+        start: seg.startTime,
+        end: seg.endTime,
+        words: [],
+        speakerIndex: 0,
+      }))
+      scriptOptions = await rewriteWithPhonetics(transcribedSegments)
     }
 
     updateJob(jobId, { progress: 70, scriptOptions })

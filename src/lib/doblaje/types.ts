@@ -13,6 +13,7 @@ export interface Segment {
   speakerId: string
   emotion: string
   context: string
+  originalText?: string
 }
 
 export interface ScriptOption {
