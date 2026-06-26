@@ -8,7 +8,7 @@ export async function generateScriptOptions(
   segments: Segment[],
   speakers: Speaker[]
 ): Promise<ScriptOption[][]> {
-  const model = genai.getGenerativeModel({ model: 'gemini-1.5-flash' })
+  const model = genai.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
   const speakerMap = Object.fromEntries(speakers.map((s) => [s.id, s.label]))
   const humors: Array<'sutil' | 'exagerado' | 'absurdo'> = ['sutil', 'exagerado', 'absurdo']

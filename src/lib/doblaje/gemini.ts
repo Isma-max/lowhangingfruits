@@ -19,7 +19,7 @@ const ELEVENLABS_VOICES = [
 ]
 
 export async function analyzeVideo(videoPath: string): Promise<VideoAnalysis> {
-  const model = genai.getGenerativeModel({ model: 'gemini-1.5-flash' })
+  const model = genai.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
   const videoData = fs.readFileSync(videoPath)
   const base64Video = videoData.toString('base64')
