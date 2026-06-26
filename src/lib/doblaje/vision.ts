@@ -15,30 +15,24 @@ export interface VisionAnalysis {
   scriptOptions: ScriptOption[][]
 }
 
-function extractFrames(videoPath: string, framesDir: string): { duration: number; frameTimestamps: number[] } {
-  if (!fs.existsSync(framesDir)) fs.mkdirSync(framesDir, { recursive: true })
+interface MouthSegment {
+  startTime: number
+  endTime: number
+  speakerIndex: number
+  duration: number
+}
 
-  const durationStr = execSync(
-    `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`,
-    { encoding: 'utf8' }
-  ).trim()
-  const duration = parseFloat(durationStr) || 30
+function detectMouthSegments(videoPath: string): { duration: number; segments: MouthSegment[] } {
+  const scriptPath = path.join(process.cwd(), 'scripts', 'detect_mouth.py')
+  const result = execSync(`python3 "${scriptPath}" "${videoPath}"`, { encoding: 'utf8' })
+  return JSON.parse(result.trim())
+}
 
-  // Extract max 12 frames spread evenly — annotate with timestamp in filename
-  const numFrames = Math.min(12, Math.floor(duration))
-  const interval = duration / numFrames
-
-  const frameTimestamps: number[] = []
-  for (let i = 0; i < numFrames; i++) {
-    const ts = i * interval
-    frameTimestamps.push(ts)
-    execSync(
-      `ffmpeg -y -ss ${ts.toFixed(2)} -i "${videoPath}" -vframes 1 -vf "scale=480:-1" "${framesDir}/frame_${String(i).padStart(3, '0')}_t${ts.toFixed(1)}.jpg"`,
-      { stdio: 'pipe' }
-    )
-  }
-
-  return { duration, frameTimestamps }
+function extractFrameAtTime(videoPath: string, timestamp: number, outputPath: string) {
+  execSync(
+    `ffmpeg -y -ss ${timestamp.toFixed(2)} -i "${videoPath}" -vframes 1 -vf "scale=480:-1" "${outputPath}"`,
+    { stdio: 'pipe' }
+  )
 }
 
 function frameToBase64(framePath: string): string {
@@ -46,47 +40,51 @@ function frameToBase64(framePath: string): string {
 }
 
 function shuffle<T>(arr: T[]): T[] {
-  return arr.sort(() => Math.random() - 0.5)
+  return [...arr].sort(() => Math.random() - 0.5)
 }
 
 export async function analyzeAndGenerateWithVision(videoPath: string): Promise<VisionAnalysis> {
-  const framesDir = path.join(
-    path.dirname(videoPath),
-    'frames_' + path.basename(videoPath, path.extname(videoPath))
-  )
+  // Step 1: Detect mouth open segments with MediaPipe
+  const mouthData = detectMouthSegments(videoPath)
+  const { duration, segments: mouthSegments } = mouthData
 
-  const { duration, frameTimestamps } = extractFrames(videoPath, framesDir)
+  // If no mouth segments detected, create evenly spaced fallback segments
+  const rawSegments: MouthSegment[] = mouthSegments.length > 0
+    ? mouthSegments
+    : Array.from({ length: 3 }, (_, i) => ({
+        startTime: (duration / 3) * i,
+        endTime: (duration / 3) * (i + 1) - 0.2,
+        speakerIndex: i % 2,
+        duration: duration / 3,
+      }))
 
-  const frameFiles = fs.readdirSync(framesDir).filter((f) => f.endsWith('.jpg')).sort()
+  // Step 2: Extract one representative frame per segment
+  const tmpDir = path.join(path.dirname(videoPath), 'tmp_frames_' + path.basename(videoPath, path.extname(videoPath)))
+  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 
-  // Build image messages with timestamp labels so GPT knows when each frame is
   const imageMessages: OpenAI.Chat.Completions.ChatCompletionContentPart[] = []
-  for (let i = 0; i < frameFiles.length; i++) {
-    const ts = frameTimestamps[i] ?? i
-    imageMessages.push({
-      type: 'text',
-      text: `[Frame en t=${ts.toFixed(1)}s]`,
-    })
+  for (let i = 0; i < rawSegments.length; i++) {
+    const seg = rawSegments[i]
+    const midpoint = (seg.startTime + seg.endTime) / 2
+    const framePath = path.join(tmpDir, `seg_${i}.jpg`)
+    extractFrameAtTime(videoPath, midpoint, framePath)
+
+    imageMessages.push({ type: 'text', text: `[Segmento ${i + 1}: t=${seg.startTime.toFixed(1)}s - ${seg.endTime.toFixed(1)}s, boca abierta detectada]` })
     imageMessages.push({
       type: 'image_url',
-      image_url: {
-        url: `data:image/jpeg;base64,${frameToBase64(path.join(framesDir, frameFiles[i]))}`,
-        detail: 'low',
-      },
+      image_url: { url: `data:image/jpeg;base64,${frameToBase64(framePath)}`, detail: 'low' },
     })
   }
 
+  // Step 3: GPT-4o invents Chilean parody dialogue for each segment
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       {
         role: 'system',
-        content: `Eres un doblajista paródico chileno experto en leer labios.
-Cada frame tiene su timestamp exacto. Usa esos timestamps para determinar CUÁNDO exactamente
-alguien está hablando (labios en movimiento) y define el startTime y endTime de cada segmento
-basado en lo que VES, no en lo que imaginas que dicen.
-
-El doblaje debe ser en ESPAÑOL CHILENO absurdo e irreverente.`,
+        content: `Eres un doblajista paródico chileno. MediaPipe detectó exactamente cuándo hay boca abierta en el video.
+Tu trabajo es INVENTAR lo que podrían estar diciendo en esos momentos — absurdo, irreverente, en español chileno.
+NO intentes adivinar lo que realmente dicen. INVENTA algo completamente diferente y gracioso.`,
       },
       {
         role: 'user',
@@ -94,28 +92,23 @@ El doblaje debe ser en ESPAÑOL CHILENO absurdo e irreverente.`,
           ...imageMessages,
           {
             type: 'text',
-            text: `Video de ${duration.toFixed(2)} segundos. Los frames tienen timestamp exacto.
+            text: `Video deportivo de ${duration.toFixed(1)}s. MediaPipe detectó ${rawSegments.length} momentos donde alguien habla.
+Los timecodes YA ESTÁN DEFINIDOS — NO los cambies.
 
-INSTRUCCIONES:
-1. Identifica los momentos donde ves labios moviéndose (alguien habla)
-2. Define startTime y endTime PRECISOS basados en los frames — estos son los timecodes reales
-3. Para cada momento de habla, INVENTA un doblaje absurdo en chileno
-4. El texto debe tener la misma cantidad de sílabas que lo que ves en los labios
-5. Asigna speakerIndex diferente si ves personas distintas hablando
-
-Genera entre 3 y 6 segmentos.
+Para cada segmento inventa 3 versiones de doblaje en CHILENO con actitud:
+- sutil: levemente cómico, con chilenismos suaves
+- exagerado: muy dramático y exagerado, más chilenismos
+- absurdo: completamente ridículo e inesperado, máximo garabatos si aplica
 
 Responde SOLO con JSON:
 {
   "segments": [
     {
-      "startTime": <número con decimales, ej: 1.5>,
-      "endTime": <número con decimales, ej: 4.2>,
-      "speakerIndex": <0 o 1>,
-      "lipContext": "<qué ves en los labios>",
-      "sutil": "<doblaje sutil en chileno>",
-      "exagerado": "<doblaje exagerado en chileno>",
-      "absurdo": "<doblaje absurdo en chileno>"
+      "segmentIndex": <0-based>,
+      "lipContext": "<qué ves en la imagen>",
+      "sutil": "<texto>",
+      "exagerado": "<texto>",
+      "absurdo": "<texto>"
     }
   ]
 }`,
@@ -124,54 +117,41 @@ Responde SOLO con JSON:
       },
     ],
     response_format: { type: 'json_object' },
-    max_tokens: 2000,
+    max_tokens: 1500,
   })
 
-  fs.rmSync(framesDir, { recursive: true, force: true })
+  fs.rmSync(tmpDir, { recursive: true, force: true })
 
   const parsed = JSON.parse(response.choices[0].message.content || '{}')
-  const rawSegments: Array<{
-    startTime: number
-    endTime: number
-    speakerIndex: number
-    lipContext: string
-    sutil: string
-    exagerado: string
-    absurdo: string
-  }> = parsed.segments || []
+  const gptSegments: Array<{ segmentIndex: number; lipContext: string; sutil: string; exagerado: string; absurdo: string }> = parsed.segments || []
 
-  // Get all available voices and shuffle for variety
-  const availableVoices = await getAvailableVoices()
-  const shuffledVoices = shuffle([...availableVoices])
+  // Step 4: Assign random voices from ElevenLabs account
+  const allVoices = await getAvailableVoices()
+  const shuffledVoices = shuffle(allVoices)
+  const speakerIndexes = [...new Set(rawSegments.map((s) => s.speakerIndex))]
 
-  // Create one speaker per unique speakerIndex, with a random voice each
-  const speakerIndexes = [...new Set(rawSegments.map((s) => s.speakerIndex || 0))]
   const speakers: Speaker[] = speakerIndexes.map((idx, i) => {
-    const voice = shuffledVoices[i % shuffledVoices.length] || shuffledVoices[0]
-    return {
-      id: `speaker_${idx}`,
-      label: voice?.name || `Voz ${i + 1}`,
-      voiceId: voice?.id || '',
-    }
+    const voice = shuffledVoices[i % shuffledVoices.length]
+    return { id: `speaker_${idx}`, label: voice?.name || `Voz ${i + 1}`, voiceId: voice?.id || '' }
   })
 
   const segments: Segment[] = rawSegments.map((s) => ({
     id: uuidv4(),
     startTime: s.startTime,
     endTime: s.endTime,
-    speakerId: `speaker_${s.speakerIndex || 0}`,
+    speakerId: `speaker_${s.speakerIndex}`,
     emotion: 'absurdo',
-    context: s.lipContext || '',
+    context: gptSegments.find((g) => g.segmentIndex === rawSegments.indexOf(s))?.lipContext || '',
   }))
 
-  const scriptOptions: ScriptOption[][] = rawSegments.map((s, i) => {
-    const seg = segments[i]
-    if (!seg) return []
+  const scriptOptions: ScriptOption[][] = segments.map((seg, i) => {
+    const gpt = gptSegments.find((g) => g.segmentIndex === i)
+    if (!gpt) return []
     const humors = ['sutil', 'exagerado', 'absurdo'] as const
     return humors.map((humor) => ({
       id: uuidv4(),
       segmentId: seg.id,
-      text: s[humor] || '',
+      text: gpt[humor] || '',
       humor,
     }))
   })
