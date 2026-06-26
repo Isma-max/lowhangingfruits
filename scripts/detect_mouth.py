@@ -30,7 +30,7 @@ def download_model_if_needed(model_path):
     urllib.request.urlretrieve(url, model_path)
 
 
-def detect_speaking_segments(video_path: str, threshold: float = 0.015, min_duration: float = 0.4):
+def detect_speaking_segments(video_path: str, threshold: float = 0.008, min_duration: float = 0.25):
     model_path = get_model_path()
     download_model_if_needed(model_path)
 
@@ -110,7 +110,7 @@ def detect_speaking_segments(video_path: str, threshold: float = 0.015, min_dura
                 })
 
     segments.sort(key=lambda s: s["startTime"])
-    segments = segments[:6]
+    segments = segments[:8]
 
     print(json.dumps({
         "duration": round(duration, 2),
