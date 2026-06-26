@@ -1,8 +1,9 @@
+import { GoogleAIFileManager } from '@google/generative-ai/server'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import * as fs from 'fs'
 import { Segment, Speaker } from './types'
 import { v4 as uuidv4 } from 'uuid'
 
+const fileManager = new GoogleAIFileManager(process.env.GEMINI_API_KEY!)
 const genai = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
 
 export interface VideoAnalysis {
@@ -18,12 +19,7 @@ const ELEVENLABS_VOICES = [
   { id: 'MF3mGyEYCl7XYWbV9V6O', label: 'Elli' },
 ]
 
-export async function analyzeVideo(videoPath: string): Promise<VideoAnalysis> {
-  const model = genai.getGenerativeModel({ model: 'gemini-2.0-flash' })
-
-  const videoData = fs.readFileSync(videoPath)
-  const base64Video = videoData.toString('base64')
-
+async function uploadAndWait(videoPath: string): Promise<string> {
   const ext = videoPath.split('.').pop()?.toLowerCase() || 'mp4'
   const mimeMap: Record<string, string> = {
     mp4: 'video/mp4',
@@ -33,10 +29,31 @@ export async function analyzeVideo(videoPath: string): Promise<VideoAnalysis> {
   }
   const mimeType = mimeMap[ext] || 'video/mp4'
 
+  const uploadResult = await fileManager.uploadFile(videoPath, { mimeType })
+  let file = uploadResult.file
+
+  while (file.state === 'PROCESSING') {
+    await new Promise((r) => setTimeout(r, 3000))
+    file = await fileManager.getFile(file.name)
+  }
+
+  if (file.state === 'FAILED') throw new Error('Video processing failed in Gemini')
+  return file.uri
+}
+
+export async function analyzeVideo(videoPath: string): Promise<VideoAnalysis> {
+  const model = genai.getGenerativeModel({ model: 'gemini-2.0-flash' })
+
+  const fileUri = await uploadAndWait(videoPath)
+  const ext = videoPath.split('.').pop()?.toLowerCase() || 'mp4'
+  const mimeMap: Record<string, string> = {
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', avi: 'video/x-msvideo',
+  }
+
   const prompt = `Analiza este video deportivo y responde SOLO con JSON válido, sin markdown ni explicaciones:
 {
   "duration": <duración total en segundos como número>,
-  "numSpeakers": <número de personas/locutores detectados>,
+  "numSpeakers": <número de personas/locutores detectados, entre 1 y 4>,
   "segments": [
     {
       "startTime": <tiempo inicio en segundos>,
@@ -48,17 +65,17 @@ export async function analyzeVideo(videoPath: string): Promise<VideoAnalysis> {
   ]
 }
 
-Detecta entre 2 y 6 segmentos según los cambios de escena o de locutor. Cada segmento debe durar al menos 2 segundos.`
+Detecta entre 2 y 5 segmentos. Cada segmento debe durar al menos 2 segundos.`
 
   const result = await model.generateContent([
-    { inlineData: { mimeType, data: base64Video } },
+    { fileData: { mimeType: mimeMap[ext] || 'video/mp4', fileUri } },
     prompt,
   ])
 
   const text = result.response.text().replace(/```json\n?|\n?```/g, '').trim()
   const parsed = JSON.parse(text)
 
-  const speakers: Speaker[] = Array.from({ length: parsed.numSpeakers || 2 }, (_, i) => ({
+  const speakers: Speaker[] = Array.from({ length: Math.max(1, parsed.numSpeakers || 2) }, (_, i) => ({
     id: `speaker_${i}`,
     label: `Locutor ${i + 1}`,
     voiceId: ELEVENLABS_VOICES[i % ELEVENLABS_VOICES.length].id,
@@ -73,9 +90,5 @@ Detecta entre 2 y 6 segmentos según los cambios de escena o de locutor. Cada se
     context: s.context || '',
   }))
 
-  return {
-    duration: parsed.duration || 30,
-    speakers,
-    segments,
-  }
+  return { duration: parsed.duration || 30, speakers, segments }
 }
