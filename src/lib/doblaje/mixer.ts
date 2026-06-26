@@ -38,12 +38,13 @@ export async function mixAndExport(
     const delays = existingLines
       .map((l, i) => {
         const delay = Math.round(l.startTime * 1000)
-        return `[${i + 1}:a]adelay=${delay}|${delay}[a${i + 1}]`
+        const maxDuration = Math.max(0.1, l.endTime - l.startTime)
+        return `[${i + 1}:a]atrim=0:${maxDuration.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${delay}|${delay}[a${i + 1}]`
       })
       .join(';')
 
     const mixLabels = ['[0:a]', ...existingLines.map((_, i) => `[a${i + 1}]`)].join('')
-    const filterComplex = `${delays};${mixLabels}amix=inputs=${existingLines.length + 1}:normalize=0[out]`
+    const filterComplex = `${delays};${mixLabels}amix=inputs=${existingLines.length + 1}:normalize=0:dropout_transition=0[out]`
 
     execSync(
       `ffmpeg -y ${inputs} -filter_complex "${filterComplex}" -map "[out]" "${mixedAudioPath}"`,

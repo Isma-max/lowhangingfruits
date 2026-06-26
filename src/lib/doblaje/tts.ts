@@ -37,7 +37,7 @@ export async function synthesizeLine(
   const audio = await client.textToSpeech.convert(useVoiceId, {
     text,
     modelId: 'eleven_multilingual_v2',
-    voiceSettings: { stability: 0.5, similarityBoost: 0.75 },
+    voiceSettings: { stability: 0.25, similarityBoost: 0.85, style: 0.7, useSpeakerBoost: true },
   })
 
   const dir = path.dirname(outputPath)
