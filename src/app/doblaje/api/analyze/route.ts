@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getJob, updateJob } from '@/lib/doblaje/store'
-import { transcribeVideo } from '@/lib/doblaje/whisper'
+import { analyzeAndGenerateWithVision } from '@/lib/doblaje/vision'
 import { getDemoAnalysis } from '@/lib/doblaje/demo-data'
-import { v4 as uuidv4 } from 'uuid'
 
 const DEMO_MODE = process.env.OPENAI_API_KEY === 'demo' || !process.env.OPENAI_API_KEY
-
-const ELEVENLABS_VOICES = [
-  { id: 'pNInz6obpgDQGcFmaJgB', label: 'Narrador' },
-  { id: 'VR6AewLTigWG4xSOukaG', label: 'Comentarista' },
-]
 
 export async function POST(req: NextRequest) {
   const { jobId } = await req.json()
@@ -24,7 +18,7 @@ export async function POST(req: NextRequest) {
       const analysis = getDemoAnalysis()
       updateJob(jobId, {
         status: 'generating',
-        progress: 40,
+        progress: 70,
         duration: analysis.duration,
         speakers: analysis.speakers,
         segments: analysis.segments,
@@ -32,36 +26,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ speakers: analysis.speakers, segments: analysis.segments })
     }
 
-    const transcribedSegments = await transcribeVideo(job.videoPath)
-
-    updateJob(jobId, { progress: 30 })
-
-    const speakers = [
-      { id: 'speaker_0', label: ELEVENLABS_VOICES[0].label, voiceId: ELEVENLABS_VOICES[0].id },
-      { id: 'speaker_1', label: ELEVENLABS_VOICES[1].label, voiceId: ELEVENLABS_VOICES[1].id },
-    ]
-
-    const segments = transcribedSegments.map((seg, i) => ({
-      id: seg.id || uuidv4(),
-      startTime: seg.start,
-      endTime: seg.end,
-      speakerId: `speaker_${i % 2}`,
-      emotion: 'narrando',
-      context: seg.text,
-      originalText: seg.text,
-    }))
-
-    const duration = segments.length > 0 ? segments[segments.length - 1].endTime : 30
+    updateJob(jobId, { progress: 20 })
+    const result = await analyzeAndGenerateWithVision(job.videoPath)
 
     updateJob(jobId, {
       status: 'generating',
-      progress: 40,
-      duration,
-      speakers,
-      segments,
+      progress: 70,
+      duration: result.duration,
+      speakers: result.speakers,
+      segments: result.segments,
+      scriptOptions: result.scriptOptions,
     })
 
-    return NextResponse.json({ speakers, segments })
+    return NextResponse.json({ speakers: result.speakers, segments: result.segments })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Analysis failed'
     updateJob(jobId, { status: 'error', error: msg })
