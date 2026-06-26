@@ -40,11 +40,12 @@ export async function GET(req: NextRequest) {
   const outputPath = path.join(process.cwd(), 'uploads', 'output', `${jobId}_doblado.mp4`)
   if (!fs.existsSync(outputPath)) return new NextResponse('File not found', { status: 404 })
 
-  const stream = fs.createReadStream(outputPath)
-  return new NextResponse(stream as unknown as ReadableStream, {
+  const buffer = fs.readFileSync(outputPath)
+  return new NextResponse(buffer, {
     headers: {
       'Content-Type': 'video/mp4',
       'Content-Disposition': `attachment; filename="doblado_${jobId}.mp4"`,
+      'Content-Length': buffer.length.toString(),
     },
   })
 }
