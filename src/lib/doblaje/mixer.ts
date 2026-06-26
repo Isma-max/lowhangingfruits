@@ -12,47 +12,49 @@ export async function mixAndExport(
   if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true })
 
   const duration = getVideoDuration(videoPath)
-  const silencePath = path.join(audioDir, 'silence.mp3')
-  const mixedAudioPath = path.join(audioDir, 'mixed.mp3')
 
-  // Generate silence base track
-  execSync(
-    `ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t ${duration} "${silencePath}"`,
-    { stdio: 'inherit' }
-  )
-
-  // Build amix command with all audio files delayed to their start times
   const existingLines = lines.filter((line) =>
     fs.existsSync(path.join(audioDir, `line_${line.segmentId}.mp3`))
   )
 
   if (existingLines.length === 0) {
-    // No audio lines, just copy silence
-    fs.copyFileSync(silencePath, mixedAudioPath)
-  } else {
-    const inputs = [
-      `-i "${silencePath}"`,
-      ...existingLines.map((l) => `-i "${path.join(audioDir, `line_${l.segmentId}.mp3`)}"`),
-    ].join(' ')
-
-    const delays = existingLines
-      .map((l, i) => {
-        const delay = Math.round(l.startTime * 1000)
-        const maxDuration = Math.max(0.1, l.endTime - l.startTime)
-        return `[${i + 1}:a]atrim=0:${maxDuration.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${delay}|${delay}[a${i + 1}]`
-      })
-      .join(';')
-
-    const mixLabels = ['[0:a]', ...existingLines.map((_, i) => `[a${i + 1}]`)].join('')
-    const filterComplex = `${delays};${mixLabels}amix=inputs=${existingLines.length + 1}:normalize=0:dropout_transition=0[out]`
-
+    // No audio lines — copy video as-is with silent audio
     execSync(
-      `ffmpeg -y ${inputs} -filter_complex "${filterComplex}" -map "[out]" "${mixedAudioPath}"`,
+      `ffmpeg -y -i "${videoPath}" -f lavfi -i anullsrc=r=44100:cl=stereo -c:v copy -c:a aac -shortest "${outputPath}"`,
       { stdio: 'inherit' }
     )
+    return
   }
 
-  // Merge mixed audio with original video
+  // For each line: pad with silence so it starts at the right timestamp
+  // Strategy: [silence of startTime seconds] + [voice audio] — then mix all tracks
+  const paddedPaths: string[] = []
+
+  for (const line of existingLines) {
+    const srcPath = path.join(audioDir, `line_${line.segmentId}.mp3`)
+    const paddedPath = path.join(audioDir, `padded_${line.segmentId}.mp3`)
+    const delayMs = Math.round(line.startTime * 1000)
+    const maxDur = line.endTime - line.startTime
+
+    // Trim to segment length, then pad silence at the start
+    execSync(
+      `ffmpeg -y -i "${srcPath}" -af "atrim=0:${maxDur.toFixed(3)},asetpts=PTS-STARTPTS,adelay=${delayMs}|${delayMs},apad=pad_dur=${(duration - line.startTime).toFixed(3)}" -t ${duration.toFixed(3)} "${paddedPath}"`,
+      { stdio: 'pipe' }
+    )
+    paddedPaths.push(paddedPath)
+  }
+
+  // Mix all padded tracks together
+  const mixedAudioPath = path.join(audioDir, 'mixed.aac')
+  const inputs = paddedPaths.map((p) => `-i "${p}"`).join(' ')
+  const amix = `amix=inputs=${paddedPaths.length}:normalize=0:dropout_transition=0`
+
+  execSync(
+    `ffmpeg -y ${inputs} -filter_complex "${amix}" -t ${duration.toFixed(3)} "${mixedAudioPath}"`,
+    { stdio: 'inherit' }
+  )
+
+  // Merge mixed audio with original video (replace audio track)
   execSync(
     `ffmpeg -y -i "${videoPath}" -i "${mixedAudioPath}" -c:v copy -map 0:v:0 -map 1:a:0 -shortest "${outputPath}"`,
     { stdio: 'inherit' }

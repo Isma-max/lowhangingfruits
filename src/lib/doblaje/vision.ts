@@ -22,6 +22,12 @@ interface MouthSegment {
   duration: number
 }
 
+function detectSceneCuts(videoPath: string): { duration: number; segments: MouthSegment[] } {
+  const scriptPath = path.join(process.cwd(), 'scripts', 'detect_cuts.py')
+  const result = execSync(`python3 "${scriptPath}" "${videoPath}"`, { encoding: 'utf8' })
+  return JSON.parse(result.trim())
+}
+
 function detectMouthSegments(videoPath: string): { duration: number; segments: MouthSegment[] } {
   const scriptPath = path.join(process.cwd(), 'scripts', 'detect_mouth.py')
   const result = execSync(`python3 "${scriptPath}" "${videoPath}"`, { encoding: 'utf8' })
@@ -44,19 +50,27 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 export async function analyzeAndGenerateWithVision(videoPath: string): Promise<VisionAnalysis> {
-  // Step 1: Detect mouth open segments with MediaPipe
-  const mouthData = detectMouthSegments(videoPath)
-  const { duration, segments: mouthSegments } = mouthData
+  // Step 1: Use scene cuts as primary timing source (matches camera edits in sports clips)
+  // Fall back to mouth detection if cuts are too few
+  const cutData = detectSceneCuts(videoPath)
+  const { duration } = cutData
 
-  // If no mouth segments detected, create evenly spaced fallback segments
-  const rawSegments: MouthSegment[] = mouthSegments.length > 0
-    ? mouthSegments
-    : Array.from({ length: 3 }, (_, i) => ({
-        startTime: (duration / 3) * i,
-        endTime: (duration / 3) * (i + 1) - 0.2,
-        speakerIndex: i % 2,
-        duration: duration / 3,
-      }))
+  let rawSegments: MouthSegment[] = cutData.segments
+
+  if (rawSegments.length < 2) {
+    const mouthData = detectMouthSegments(videoPath)
+    rawSegments = mouthData.segments
+  }
+
+  // Final fallback: evenly spaced segments
+  if (rawSegments.length === 0) {
+    rawSegments = Array.from({ length: 4 }, (_, i) => ({
+      startTime: (duration / 4) * i,
+      endTime: (duration / 4) * (i + 1) - 0.1,
+      speakerIndex: i % 2,
+      duration: duration / 4,
+    }))
+  }
 
   // Step 2: Extract one representative frame per segment
   const tmpDir = path.join(path.dirname(videoPath), 'tmp_frames_' + path.basename(videoPath, path.extname(videoPath)))
