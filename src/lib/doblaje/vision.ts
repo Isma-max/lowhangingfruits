@@ -82,19 +82,22 @@ export async function analyzeAndGenerateWithVision(videoPath: string): Promise<V
     messages: [
       {
         role: 'system',
-        content: `Eres un doblajista paródico chileno experto en fonética visual (visemas).
+        content: `Eres un doblajista paródico chileno experto en fonética visual (visemas). Tu trabajo es inventar diálogo VARIADO, creativo y gracioso — NUNCA repitas la misma frase ni el mismo inicio entre segmentos.
 
-REGLAS DE VISEMAS — úsalas para que el texto inventado calce con los movimientos de boca:
-- Labios JUNTOS/CERRADOS → palabras que empiezan con B, P, M (ej: "pero", "mira", "bien")
-- Labios REDONDEADOS → palabras con O, U (ej: "todo", "weon", "po")
-- Boca MUY ABIERTA → palabras con A fuerte (ej: "la raja", "bacán", "aah")
-- Boca ESTIRADA horizontal → palabras con E, I (ej: "si", "mierda", "eso")
-- Dientes VISIBLES → F, V, S (ej: "filo", "vai a ver", "si po")
-- Boca APENAS ABIERTA → consonantes suaves, murmullos
+REGLAS DE VISEMAS — la PRIMERA palabra de cada línea debe calzar con la forma de la boca:
+- Labios JUNTOS/CERRADOS → empieza con B, P, M (ej: "Pero weón", "Mira esto", "Basta ya")
+- Labios REDONDEADOS → empieza con O, U o sílaba redonda (ej: "Oye", "Weon", "Todo")
+- Boca MUY ABIERTA → empieza con A (ej: "A la raja", "Ahí va", "Apúrate") — pero el RESTO de la frase debe ser DIFERENTE entre segmentos
+- Boca ESTIRADA horizontal → empieza con E, I (ej: "Es que", "Increíble", "Sí po")
+- Dientes VISIBLES → empieza con F, V, S (ej: "Filo", "Vai a ver", "Sácate")
 
-Cuando veas la imagen del frame, fíjate en la FORMA exacta de la boca y elige palabras cuya primera sílaba tenga el visema correspondiente.
-
-Tu trabajo es INVENTAR diálogo absurdo en chileno que calce con lo que ves en los labios.`,
+REGLAS DE CONTENIDO — OBLIGATORIO:
+- Cada segmento debe hablar de un TEMA DISTINTO (comida, plata, familia, fútbol, política, pololeo, etc.)
+- NUNCA uses "Aah" o "Aaah" como inicio — si la boca está abierta usa una palabra real con A
+- sutil: chilenismo suave, situación cotidiana
+- exagerado: drama máximo, exageración ridícula
+- absurdo: sin sentido total, non-sequitur, con garabatos si aplica
+- Las 3 versiones de cada segmento deben ser MUY diferentes entre sí`,
       },
       {
         role: 'user',
@@ -106,14 +109,12 @@ Tu trabajo es INVENTAR diálogo absurdo en chileno que calce con lo que ves en l
 Los timecodes YA ESTÁN DEFINIDOS — NO los cambies.
 
 Para cada segmento:
-1. Describe la FORMA EXACTA de la boca en el frame (labios juntos, redondeados, abiertos, etc)
-2. Basándote en esa forma, elige palabras cuya fonética calce con el visema
-3. Inventa 3 versiones de doblaje en CHILENO con actitud
+1. Describe la FORMA EXACTA de la boca (labios juntos/redondeados/muy abiertos/estirados/dientes visibles)
+2. Elige el visema correspondiente
+3. Inventa 3 versiones MUY DISTINTAS entre sí, sobre temas DIFERENTES a los otros segmentos
+4. La primera palabra DEBE calzar con el visema. El resto puede ser libre y creativo.
 
-Versiones:
-- sutil: levemente cómico, chilenismos suaves, fonética calza con labios
-- exagerado: muy dramático, más chilenismos, fonética calza con labios
-- absurdo: completamente ridículo, máximo garabatos, fonética calza con labios
+IMPORTANTE: Si varios segmentos tienen "boca muy abierta", igual deben tener frases COMPLETAMENTE distintas en contenido y tema.
 
 Responde SOLO con JSON:
 {
