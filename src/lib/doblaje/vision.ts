@@ -5,13 +5,9 @@ import * as path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import { Segment, Speaker } from './types'
 import { ScriptOption } from './types'
+import { getAvailableVoices } from './tts'
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! })
-
-const ELEVENLABS_VOICES = [
-  { id: 'pNInz6obpgDQGcFmaJgB', label: 'Narrador' },
-  { id: 'VR6AewLTigWG4xSOukaG', label: 'Comentarista' },
-]
 
 export interface VisionAnalysis {
   duration: number
@@ -115,9 +111,13 @@ Responde SOLO con JSON válido:
   const parsed = JSON.parse(response.choices[0].message.content || '{}')
   const rawSegments = parsed.segments || []
 
+  const availableVoices = await getAvailableVoices()
+  const voice0 = availableVoices[0] || { id: 'pNInz6obpgDQGcFmaJgB', name: 'Narrador' }
+  const voice1 = availableVoices[1] || voice0
+
   const speakers: Speaker[] = [
-    { id: 'speaker_0', label: ELEVENLABS_VOICES[0].label, voiceId: ELEVENLABS_VOICES[0].id },
-    { id: 'speaker_1', label: ELEVENLABS_VOICES[1].label, voiceId: ELEVENLABS_VOICES[1].id },
+    { id: 'speaker_0', label: voice0.name, voiceId: voice0.id },
+    { id: 'speaker_1', label: voice1.name, voiceId: voice1.id },
   ]
 
   const segments: Segment[] = rawSegments.map((s: {
