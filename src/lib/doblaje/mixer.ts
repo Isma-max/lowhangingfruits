@@ -1,6 +1,6 @@
-import ffmpeg from 'fluent-ffmpeg'
 import * as path from 'path'
 import * as fs from 'fs'
+import { execSync } from 'child_process'
 import { SelectedLine } from './types'
 
 export async function mixAndExport(
@@ -9,92 +9,63 @@ export async function mixAndExport(
   audioDir: string,
   outputPath: string
 ): Promise<void> {
+  if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true })
+
+  const duration = getVideoDuration(videoPath)
   const silencePath = path.join(audioDir, 'silence.mp3')
   const mixedAudioPath = path.join(audioDir, 'mixed.mp3')
 
-  await getVideoDuration(videoPath).then((duration) =>
-    generateSilence(silencePath, duration)
+  // Generate silence base track
+  execSync(
+    `ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t ${duration} "${silencePath}"`,
+    { stdio: 'inherit' }
   )
 
-  const filterInputs: string[] = [silencePath]
-  const filterParts: string[] = ['[0:a]']
+  // Build amix command with all audio files delayed to their start times
+  const existingLines = lines.filter((line) =>
+    fs.existsSync(path.join(audioDir, `line_${line.segmentId}.mp3`))
+  )
 
-  lines.forEach((line, i) => {
-    const audioFile = path.join(audioDir, `line_${line.segmentId}.mp3`)
-    if (!fs.existsSync(audioFile)) return
-    filterInputs.push(audioFile)
-    filterParts.push(`[${i + 1}:a]adelay=${Math.round(line.startTime * 1000)}|${Math.round(line.startTime * 1000)}`)
-  })
+  if (existingLines.length === 0) {
+    // No audio lines, just copy silence
+    fs.copyFileSync(silencePath, mixedAudioPath)
+  } else {
+    const inputs = [
+      `-i "${silencePath}"`,
+      ...existingLines.map((l) => `-i "${path.join(audioDir, `line_${l.segmentId}.mp3`)}"`),
+    ].join(' ')
 
-  await new Promise<void>((resolve, reject) => {
-    let cmd = ffmpeg()
-
-    filterInputs.forEach((f) => cmd = cmd.input(f))
-
-    const delayFilters = lines
-      .map((line, i) => {
-        const audioFile = path.join(audioDir, `line_${line.segmentId}.mp3`)
-        if (!fs.existsSync(audioFile)) return null
-        const delay = Math.round(line.startTime * 1000)
+    const delays = existingLines
+      .map((l, i) => {
+        const delay = Math.round(l.startTime * 1000)
         return `[${i + 1}:a]adelay=${delay}|${delay}[a${i + 1}]`
       })
-      .filter(Boolean)
+      .join(';')
 
-    const mixInputs = ['[0:a]', ...lines.map((_, i) => `[a${i + 1}]`)].join('')
-    const filterComplex = [
-      ...delayFilters,
-      `${mixInputs}amix=inputs=${lines.length + 1}:normalize=0[out]`,
-    ].join(';')
+    const mixLabels = ['[0:a]', ...existingLines.map((_, i) => `[a${i + 1}]`)].join('')
+    const filterComplex = `${delays};${mixLabels}amix=inputs=${existingLines.length + 1}:normalize=0[out]`
 
-    cmd
-      .complexFilter(filterComplex, 'out')
-      .output(mixedAudioPath)
-      .on('end', () => resolve())
-      .on('error', reject)
-      .run()
-  })
+    execSync(
+      `ffmpeg -y ${inputs} -filter_complex "${filterComplex}" -map "[out]" "${mixedAudioPath}"`,
+      { stdio: 'inherit' }
+    )
+  }
 
-  await new Promise<void>((resolve, reject) => {
-    ffmpeg()
-      .input(videoPath)
-      .input(mixedAudioPath)
-      .outputOptions(['-c:v copy', '-map 0:v:0', '-map 1:a:0', '-shortest'])
-      .output(outputPath)
-      .on('end', () => resolve())
-      .on('error', reject)
-      .run()
-  })
+  // Merge mixed audio with original video
+  execSync(
+    `ffmpeg -y -i "${videoPath}" -i "${mixedAudioPath}" -c:v copy -map 0:v:0 -map 1:a:0 -shortest "${outputPath}"`,
+    { stdio: 'inherit' }
+  )
+
+  if (!fs.existsSync(outputPath)) {
+    throw new Error('Output file was not created by FFmpeg')
+  }
 }
 
-function getVideoDuration(videoPath: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    ffmpeg.ffprobe(videoPath, (err, meta) => {
-      if (err) reject(err)
-      else resolve(meta.format.duration || 60)
-    })
-  })
-}
-
-function generateSilence(outputPath: string, duration: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const { execSync } = require('child_process')
-    try {
-      execSync(
-        `ffmpeg -y -f lavfi -i anullsrc=r=44100:cl=stereo -t ${duration} -ar 44100 -ac 2 "${outputPath}"`,
-        { stdio: 'pipe' }
-      )
-      resolve()
-    } catch {
-      // fallback: generate silence from a short sine wave stretched
-      try {
-        execSync(
-          `ffmpeg -y -f lavfi -i "sine=frequency=1:sample_rate=44100" -t ${duration} -af "volume=0" -ar 44100 -ac 2 "${outputPath}"`,
-          { stdio: 'pipe' }
-        )
-        resolve()
-      } catch (e2) {
-        reject(new Error(`Could not generate silence: ${e2}`))
-      }
-    }
-  })
+function getVideoDuration(videoPath: string): number {
+  const result = execSync(
+    `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`,
+    { encoding: 'utf8' }
+  )
+  return parseFloat(result.trim()) || 30
 }
