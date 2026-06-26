@@ -15,20 +15,27 @@ export interface VisionAnalysis {
   scriptOptions: ScriptOption[][]
 }
 
-interface MouthSegment {
+interface RawCut {
   startTime: number
   endTime: number
   speakerIndex: number
   duration: number
 }
 
-function detectSceneCuts(videoPath: string): { duration: number; segments: MouthSegment[] } {
+interface RefinedSegment {
+  cutStart: number   // camera cut start
+  mouthOpen: number  // audio starts here
+  mouthClose: number // audio ends here, video cuts here
+  speakerIndex: number
+}
+
+function detectSceneCuts(videoPath: string): { duration: number; segments: RawCut[] } {
   const scriptPath = path.join(process.cwd(), 'scripts', 'detect_cuts.py')
   const result = execSync(`python3 "${scriptPath}" "${videoPath}"`, { encoding: 'utf8' })
   return JSON.parse(result.trim())
 }
 
-function detectMouthSegments(videoPath: string): { duration: number; segments: MouthSegment[] } {
+function detectMouthSegments(videoPath: string): { duration: number; segments: RawCut[] } {
   const scriptPath = path.join(process.cwd(), 'scripts', 'detect_mouth.py')
   const result = execSync(`python3 "${scriptPath}" "${videoPath}"`, { encoding: 'utf8' })
   return JSON.parse(result.trim())
@@ -49,69 +56,103 @@ function shuffle<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5)
 }
 
+// For each scene cut, find the mouth open/close within it using mouth segments
+function refineWithMouth(cuts: RawCut[], mouthSegs: RawCut[], duration: number): RefinedSegment[] {
+  return cuts.map((cut) => {
+    // Find mouth segments that overlap this cut
+    const overlapping = mouthSegs.filter(
+      (m) => m.startTime < cut.endTime && m.endTime > cut.startTime
+    )
+
+    if (overlapping.length > 0) {
+      // Use first mouth open and last mouth close within this cut
+      const mouthOpen = Math.max(cut.startTime, Math.min(...overlapping.map((m) => m.startTime)))
+      const mouthClose = Math.min(cut.endTime, Math.max(...overlapping.map((m) => m.endTime)))
+      return {
+        cutStart: cut.startTime,
+        mouthOpen,
+        mouthClose,
+        speakerIndex: overlapping[0].speakerIndex,
+      }
+    }
+
+    // No mouth detected in this cut — use cut boundaries, audio starts at cut start
+    return {
+      cutStart: cut.startTime,
+      mouthOpen: cut.startTime,
+      mouthClose: cut.endTime,
+      speakerIndex: cut.speakerIndex,
+    }
+  })
+}
+
 export async function analyzeAndGenerateWithVision(videoPath: string): Promise<VisionAnalysis> {
-  // Step 1: Use scene cuts as primary timing source (matches camera edits in sports clips)
-  // Fall back to mouth detection if cuts are too few
+  // Step 1: Detect scene cuts (camera edits define segments)
   const cutData = detectSceneCuts(videoPath)
   const { duration } = cutData
+  let cuts = cutData.segments
 
-  let rawSegments: MouthSegment[] = cutData.segments
-
-  if (rawSegments.length < 2) {
+  // Step 2: Detect mouth open/close for timing refinement
+  let mouthSegs: RawCut[] = []
+  try {
     const mouthData = detectMouthSegments(videoPath)
-    rawSegments = mouthData.segments
+    mouthSegs = mouthData.segments
+  } catch {
+    // mouth detection optional — cuts alone work fine
   }
 
-  // Final fallback: evenly spaced segments
-  if (rawSegments.length === 0) {
-    rawSegments = Array.from({ length: 4 }, (_, i) => ({
-      startTime: (duration / 4) * i,
-      endTime: (duration / 4) * (i + 1) - 0.1,
-      speakerIndex: i % 2,
-      duration: duration / 4,
-    }))
+  // Fallback: if no cuts detected, use mouth segments or even spacing
+  if (cuts.length < 2) {
+    cuts = mouthSegs.length >= 2
+      ? mouthSegs
+      : Array.from({ length: 4 }, (_, i) => ({
+          startTime: (duration / 4) * i,
+          endTime: (duration / 4) * (i + 1) - 0.1,
+          speakerIndex: i % 2,
+          duration: duration / 4,
+        }))
   }
 
-  // Step 2: Extract one representative frame per segment
+  // Step 3: Refine each cut segment with mouth open/close timing
+  const refined = refineWithMouth(cuts, mouthSegs, duration)
+
+  // Step 4: Extract one frame per segment for GPT vision
   const tmpDir = path.join(path.dirname(videoPath), 'tmp_frames_' + path.basename(videoPath, path.extname(videoPath)))
   if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true })
 
   const imageMessages: OpenAI.Chat.Completions.ChatCompletionContentPart[] = []
-  for (let i = 0; i < rawSegments.length; i++) {
-    const seg = rawSegments[i]
-    const midpoint = (seg.startTime + seg.endTime) / 2
+  for (let i = 0; i < refined.length; i++) {
+    const seg = refined[i]
+    const midpoint = (seg.mouthOpen + seg.mouthClose) / 2
     const framePath = path.join(tmpDir, `seg_${i}.jpg`)
     extractFrameAtTime(videoPath, midpoint, framePath)
 
-    imageMessages.push({ type: 'text', text: `[Segmento ${i + 1}: t=${seg.startTime.toFixed(1)}s - ${seg.endTime.toFixed(1)}s, boca abierta detectada]` })
+    imageMessages.push({
+      type: 'text',
+      text: `[Clip ${i + 1}: plano ${seg.cutStart.toFixed(1)}s, boca abre ${seg.mouthOpen.toFixed(1)}s - cierra ${seg.mouthClose.toFixed(1)}s]`,
+    })
     imageMessages.push({
       type: 'image_url',
       image_url: { url: `data:image/jpeg;base64,${frameToBase64(framePath)}`, detail: 'low' },
     })
   }
 
-  // Step 3: GPT-4o invents Chilean parody dialogue for each segment
+  // Step 5: GPT-4o invents Chilean parody dialogue
   const response = await openai.chat.completions.create({
     model: 'gpt-4o',
     messages: [
       {
         role: 'system',
-        content: `Eres un doblajista paródico chileno experto en fonética visual (visemas). Tu trabajo es inventar diálogo VARIADO, creativo y gracioso — NUNCA repitas la misma frase ni el mismo inicio entre segmentos.
+        content: `Eres un doblajista paródico chileno. Tu trabajo: inventar lo que podría estar diciendo el personaje en la imagen. Sé creativo, variado y gracioso.
 
-REGLAS DE VISEMAS — la PRIMERA palabra de cada línea debe calzar con la forma de la boca:
-- Labios JUNTOS/CERRADOS → empieza con B, P, M (ej: "Pero weón", "Mira esto", "Basta ya")
-- Labios REDONDEADOS → empieza con O, U o sílaba redonda (ej: "Oye", "Weon", "Todo")
-- Boca MUY ABIERTA → empieza con A (ej: "A la raja", "Ahí va", "Apúrate") — pero el RESTO de la frase debe ser DIFERENTE entre segmentos
-- Boca ESTIRADA horizontal → empieza con E, I (ej: "Es que", "Increíble", "Sí po")
-- Dientes VISIBLES → empieza con F, V, S (ej: "Filo", "Vai a ver", "Sácate")
-
-REGLAS DE CONTENIDO — OBLIGATORIO:
-- Cada segmento debe hablar de un TEMA DISTINTO (comida, plata, familia, fútbol, política, pololeo, etc.)
-- NUNCA uses "Aah" o "Aaah" como inicio — si la boca está abierta usa una palabra real con A
-- sutil: chilenismo suave, situación cotidiana
-- exagerado: drama máximo, exageración ridícula
-- absurdo: sin sentido total, non-sequitur, con garabatos si aplica
-- Las 3 versiones de cada segmento deben ser MUY diferentes entre sí`,
+REGLAS:
+- Cada segmento debe hablar de un TEMA DISTINTO (comida, plata, familia, deporte, política, etc.)
+- Las 3 versiones de cada segmento deben ser muy diferentes entre sí
+- sutil: chilenismo suave, cotidiano
+- exagerado: drama total, ridículo
+- absurdo: sin sentido, garabatos si aplica
+- NUNCA repitas frases entre segmentos
+- El texto debe calzar con la DURACIÓN del segmento (boca abre/cierra = tiempo disponible)`,
       },
       {
         role: 'user',
@@ -119,27 +160,19 @@ REGLAS DE CONTENIDO — OBLIGATORIO:
           ...imageMessages,
           {
             type: 'text',
-            text: `Video deportivo de ${duration.toFixed(1)}s. MediaPipe detectó ${rawSegments.length} momentos donde alguien habla.
+            text: `Video deportivo de ${duration.toFixed(1)}s con ${refined.length} clips.
 Los timecodes YA ESTÁN DEFINIDOS — NO los cambies.
-
-Para cada segmento:
-1. Describe la FORMA EXACTA de la boca (labios juntos/redondeados/muy abiertos/estirados/dientes visibles)
-2. Elige el visema correspondiente
-3. Inventa 3 versiones MUY DISTINTAS entre sí, sobre temas DIFERENTES a los otros segmentos
-4. La primera palabra DEBE calzar con el visema. El resto puede ser libre y creativo.
-
-IMPORTANTE: Si varios segmentos tienen "boca muy abierta", igual deben tener frases COMPLETAMENTE distintas en contenido y tema.
+Cada texto debe calzar aproximadamente con la duración indicada (mouthOpen → mouthClose).
 
 Responde SOLO con JSON:
 {
   "segments": [
     {
       "segmentIndex": <0-based>,
-      "lipContext": "<forma exacta de boca que ves: labios juntos/redondeados/abiertos/etc>",
-      "viseme": "<visema detectado: B-P-M / O-U / A / E-I / F-V-S>",
-      "sutil": "<texto con fonética que calza>",
-      "exagerado": "<texto con fonética que calza>",
-      "absurdo": "<texto con fonética que calza>"
+      "context": "<qué se ve en la imagen>",
+      "sutil": "<texto>",
+      "exagerado": "<texto>",
+      "absurdo": "<texto>"
     }
   ]
 }`,
@@ -154,25 +187,26 @@ Responde SOLO con JSON:
   fs.rmSync(tmpDir, { recursive: true, force: true })
 
   const parsed = JSON.parse(response.choices[0].message.content || '{}')
-  const gptSegments: Array<{ segmentIndex: number; lipContext: string; sutil: string; exagerado: string; absurdo: string }> = parsed.segments || []
+  const gptSegments: Array<{ segmentIndex: number; context: string; sutil: string; exagerado: string; absurdo: string }> = parsed.segments || []
 
-  // Step 4: Assign random voices from ElevenLabs account
+  // Step 6: Assign random voices
   const allVoices = await getAvailableVoices()
   const shuffledVoices = shuffle(allVoices)
-  const speakerIndexes = [...new Set(rawSegments.map((s) => s.speakerIndex))]
+  const speakerIndexes = [...new Set(refined.map((s) => s.speakerIndex))]
 
   const speakers: Speaker[] = speakerIndexes.map((idx, i) => {
     const voice = shuffledVoices[i % shuffledVoices.length]
     return { id: `speaker_${idx}`, label: voice?.name || `Voz ${i + 1}`, voiceId: voice?.id || '' }
   })
 
-  const segments: Segment[] = rawSegments.map((s) => ({
+  const segments: Segment[] = refined.map((s, i) => ({
     id: uuidv4(),
-    startTime: s.startTime,
-    endTime: s.endTime,
+    cutStart: s.cutStart,
+    startTime: s.mouthOpen,
+    endTime: s.mouthClose,
     speakerId: `speaker_${s.speakerIndex}`,
     emotion: 'absurdo',
-    context: gptSegments.find((g) => g.segmentIndex === rawSegments.indexOf(s))?.lipContext || '',
+    context: gptSegments.find((g) => g.segmentIndex === i)?.context || '',
   }))
 
   const scriptOptions: ScriptOption[][] = segments.map((seg, i) => {

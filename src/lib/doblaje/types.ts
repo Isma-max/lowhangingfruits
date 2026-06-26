@@ -8,8 +8,9 @@ export interface Speaker {
 
 export interface Segment {
   id: string
-  startTime: number
-  endTime: number
+  cutStart: number   // when the camera cut happens (video clip start)
+  startTime: number  // when the mouth opens (audio starts here)
+  endTime: number    // when the mouth closes (audio ends, video cuts to next)
   speakerId: string
   emotion: string
   context: string

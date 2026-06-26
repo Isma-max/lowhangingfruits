@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
   const outputPath = path.join(outputDir, `${jobId}_doblado.mp4`)
 
   try {
-    await mixAndExport(job.videoPath, job.selectedLines, audioDir, outputPath)
+    await mixAndExport(job.videoPath, job.selectedLines, job.segments ?? [], audioDir, outputPath)
     updateJob(jobId, {
       status: 'done',
       progress: 100,
