@@ -3,6 +3,18 @@ import * as fs from 'fs'
 import { execSync } from 'child_process'
 import { SelectedLine, Segment } from './types'
 
+function getAudioDuration(filePath: string): number {
+  try {
+    const result = execSync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`,
+      { encoding: 'utf8' }
+    )
+    return parseFloat(result.trim()) || 0
+  } catch {
+    return 0
+  }
+}
+
 export async function mixAndExport(
   videoPath: string,
   lines: SelectedLine[],
@@ -34,21 +46,19 @@ export async function mixAndExport(
 
     if (hasAudio) {
       // Audio delay within this clip: mouth opens at (startTime - cutStart)
-      const audioOffsetMs = Math.max(0, Math.round((seg.startTime - cutStart) * 1000))
-      const audioDuration = seg.endTime - seg.startTime
+      const audioOffsetSec = Math.max(0, seg.startTime - cutStart)
+      const audioOffsetMs = Math.round(audioOffsetSec * 1000)
 
-      // Trim dubbed audio to mouth duration, then pad silence before/after within clip
-      const trimmedAudio = path.join(clipsDir, `audio_${i}.mp3`)
-      execSync(
-        `ffmpeg -y -i "${audioFile}" -af "atrim=0:${audioDuration.toFixed(3)},asetpts=PTS-STARTPTS" "${trimmedAudio}"`,
-        { stdio: 'pipe' }
-      )
+      // Use actual synthesized audio duration to determine where the video cuts
+      const rawAudioDuration = getAudioDuration(audioFile)
+      const actualEndSec = cutStart + audioOffsetSec + rawAudioDuration
+      const actualClipDuration = Math.min(actualEndSec - cutStart, clipDuration)
 
-      // Build clip: video trimmed to endTime, audio placed at mouth-open offset
+      // Build clip: video trimmed to actual audio end, audio placed at mouth-open offset
       execSync(
-        `ffmpeg -y -ss ${cutStart.toFixed(3)} -t ${clipDuration.toFixed(3)} -i "${videoPath}" \
--i "${trimmedAudio}" \
--filter_complex "[1:a]adelay=${audioOffsetMs}|${audioOffsetMs},apad[dubbed];[dubbed]atrim=0:${clipDuration.toFixed(3)}[out]" \
+        `ffmpeg -y -ss ${cutStart.toFixed(3)} -t ${actualClipDuration.toFixed(3)} -i "${videoPath}" \
+-i "${audioFile}" \
+-filter_complex "[1:a]adelay=${audioOffsetMs}|${audioOffsetMs}[dubbed];[dubbed]atrim=0:${actualClipDuration.toFixed(3)}[out]" \
 -map 0:v:0 -map "[out]" -c:v libx264 -preset fast -crf 22 -c:a aac "${clipPath}"`,
         { stdio: 'pipe' }
       )

@@ -127,9 +127,10 @@ export async function analyzeAndGenerateWithVision(videoPath: string): Promise<V
     const framePath = path.join(tmpDir, `seg_${i}.jpg`)
     extractFrameAtTime(videoPath, midpoint, framePath)
 
+    const mouthDuration = seg.mouthClose - seg.mouthOpen
     imageMessages.push({
       type: 'text',
-      text: `[Clip ${i + 1}: plano ${seg.cutStart.toFixed(1)}s, boca abre ${seg.mouthOpen.toFixed(1)}s - cierra ${seg.mouthClose.toFixed(1)}s]`,
+      text: `[Clip ${i + 1}: boca abre ${seg.mouthOpen.toFixed(1)}s - cierra ${seg.mouthClose.toFixed(1)}s → ${mouthDuration.toFixed(1)}s de habla disponibles]`,
     })
     imageMessages.push({
       type: 'image_url',
@@ -152,7 +153,7 @@ REGLAS:
 - exagerado: drama total, ridículo
 - absurdo: sin sentido, garabatos si aplica
 - NUNCA repitas frases entre segmentos
-- El texto debe calzar con la DURACIÓN del segmento (boca abre/cierra = tiempo disponible)`,
+- El texto DEBE calzar con la duración disponible de cada clip (indicada en segundos). Español chileno spoken a ~3 sílabas/segundo. 1s ≈ 3-4 palabras cortas. 2s ≈ una frase. 4s+ ≈ dos frases. Ajusta el largo exactamente.`,
       },
       {
         role: 'user',
