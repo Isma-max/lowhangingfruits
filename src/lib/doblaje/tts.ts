@@ -11,7 +11,7 @@ let cachedVoices: { id: string; name: string }[] = []
 export async function getAvailableVoices(): Promise<{ id: string; name: string }[]> {
   if (cachedVoices.length > 0) return cachedVoices
   const response = await client.voices.getAll()
-  cachedVoices = (response.voices || []).slice(0, 4).map((v) => ({
+  cachedVoices = (response.voices || []).map((v) => ({
     id: v.voiceId,
     name: v.name || 'Voice',
   }))
