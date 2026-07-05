@@ -1,0 +1,8 @@
+<svg width="480" height="270" viewBox="0 0 480 270" xmlns="http://www.w3.org/2000/svg">
+  <rect width="480" height="270" fill="#1a1a1f"/>
+  <rect x="0" y="0" width="480" height="270" fill="#7c6af7" fill-opacity="0.08"/>
+  <circle cx="240" cy="112" r="46" fill="none" stroke="#7c6af7" stroke-width="3"/>
+  <path d="M240 90 v22 M240 112 l16 10" stroke="#7c6af7" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <text x="240" y="195" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#f0f0f5" text-anchor="middle">EL CHACOTERO SENTIMENTAL</text>
+  <text x="240" y="222" font-family="Arial, sans-serif" font-size="13" fill="#8888a0" text-anchor="middle">Miniatura de demostración</text>
+</svg>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { MarketSelector } from "@/components/dashboard/market-selector";
 import { OpportunityBoard } from "@/components/dashboard/opportunity-board";
 import { Top5Today } from "@/components/dashboard/top5-today";
@@ -10,7 +11,7 @@ import { TopicDrawer } from "@/components/dashboard/topic-drawer";
 import { MOCK_TOPICS, MARKETS } from "@/lib/mock-data";
 import { Topic, MarketId } from "@/lib/types";
 import { exportToJSON, exportToMarkdown } from "@/lib/export";
-import { Download, RefreshCw, Zap, Radio } from "lucide-react";
+import { Download, RefreshCw, Zap, Radio, Sparkles } from "lucide-react";
 
 interface TopicsResponse {
   topics: Topic[];
@@ -100,6 +101,13 @@ export default function Dashboard() {
                 <div className="text-xs text-[var(--text-muted)]">{topicCount} topics hoy</div>
               </div>
             </div>
+            <Link
+              href="/chacotero"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--surface-2)] border border-[var(--border)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--accent)] transition-all"
+            >
+              <Sparkles size={12} />
+              Chacotero Editor
+            </Link>
             <div className="relative">
               <button
                 onClick={() => setExportOpen(!exportOpen)}
