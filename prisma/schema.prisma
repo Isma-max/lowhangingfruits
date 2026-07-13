@@ -1,0 +1,194 @@
+// YouTube Performance Reporter — data model.
+//
+// Provider is SQLite: no Postgres instance is provisioned in this
+// environment and the MVP must run without external infra. Fields are
+// kept Postgres-compatible (no SQLite-only types) so switching the
+// provider + DATABASE_URL is the only change needed to move to Postgres.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum Role {
+  ADMIN
+  EDITOR
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(EDITOR)
+  createdAt    DateTime @default(now())
+  uploads      Upload[]
+  reports      Report[]
+}
+
+model Client {
+  id        String    @id @default(cuid())
+  name      String
+  createdAt DateTime  @default(now())
+  channels  Channel[]
+
+  @@unique([name])
+}
+
+model Channel {
+  id        String    @id @default(cuid())
+  client    Client    @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId  String
+  name      String
+  handle    String? // e.g. @wokitoki
+  createdAt DateTime  @default(now())
+  periods   Period[]
+
+  @@unique([clientId, name])
+}
+
+enum ComparisonMode {
+  PREVIOUS_PERIOD
+  YEAR_OVER_YEAR
+  CUSTOM
+  NONE
+}
+
+model Period {
+  id              String         @id @default(cuid())
+  channel         Channel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  channelId       String
+  name            String
+  startDate       DateTime
+  endDate         DateTime
+  comparisonMode  ComparisonMode @default(PREVIOUS_PERIOD)
+  comparePeriodId String? // set when comparisonMode = CUSTOM, points at another Period
+  createdAt       DateTime       @default(now())
+
+  uploads      Upload[]
+  dailyMetrics DailyMetric[]
+  videoMetrics VideoMetric[]
+  reports      Report[]
+
+  @@index([channelId])
+}
+
+enum FileType {
+  GENERAL
+  PER_VIDEO
+}
+
+enum UploadStatus {
+  PENDING
+  VALIDATED
+  CONFIRMED
+  REJECTED
+  SUPERSEDED
+}
+
+model ColumnMappingPreset {
+  id             String   @id @default(cuid())
+  channelId      String?
+  fileType       FileType
+  // sourceHeader (normalized/lowercased) -> canonical field name
+  mapping        String // JSON.stringify(Record<string,string>)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([channelId, fileType])
+}
+
+model Upload {
+  id            String       @id @default(cuid())
+  period        Period       @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  periodId      String
+  user          User         @relation(fields: [userId], references: [id])
+  userId        String
+  fileType      FileType
+  originalName  String // sanitized display name; never used as a filesystem path
+  rawContent    String // original CSV text, stored DB-side (access-controlled via app auth)
+  hash          String
+  parserVersion String
+  status        UploadStatus @default(PENDING)
+  rowCount      Int          @default(0)
+  validRowCount Int          @default(0)
+  metricsAvailable String // JSON string[]
+  metricsMissing   String // JSON string[]
+  errors           String // JSON of blocking errors
+  warnings         String // JSON of non-blocking warnings
+  createdAt     DateTime     @default(now())
+
+  dailyMetrics  DailyMetric[]
+  videoMetrics  VideoMetric[]
+
+  @@index([periodId, fileType])
+  @@index([hash])
+}
+
+model DailyMetric {
+  id                   String   @id @default(cuid())
+  period               Period   @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  periodId             String
+  upload               Upload   @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  uploadId             String
+  date                 DateTime
+  views                Int?
+  watchTimeHours       Float?
+  subscribersGained    Int?
+  subscribersLost      Int?
+  impressions          Int?
+  impressionsCtr       Float?
+  averageViewDuration  Int? // seconds
+  averageViewPercentage Float?
+  estimatedRevenue     Float?
+
+  @@unique([uploadId, date])
+  @@index([periodId])
+}
+
+model VideoMetric {
+  id                    String    @id @default(cuid())
+  period                Period    @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  periodId              String
+  upload                Upload    @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  uploadId              String
+  videoId               String?
+  title                 String
+  url                   String?
+  publishedAt           DateTime?
+  durationSeconds       Int?
+  views                 Int?
+  watchTimeHours        Float?
+  averageViewDuration   Int? // seconds
+  averageViewPercentage Float?
+  impressions           Int?
+  impressionsCtr        Float?
+  likes                 Int?
+  comments              Int?
+  shares                Int?
+  subscribersGained     Int?
+  subscribersLost       Int?
+  estimatedRevenue      Float?
+
+  @@index([periodId])
+  @@index([uploadId])
+  @@index([periodId, videoId])
+}
+
+model Report {
+  id           String   @id @default(cuid())
+  period       Period   @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  periodId     String
+  user         User     @relation(fields: [userId], references: [id])
+  userId       String
+  name         String
+  conclusions  String // JSON: editable text blocks
+  config       String // JSON: sections/metrics/video count selected
+  pdfPath      String?
+  createdAt    DateTime @default(now())
+
+  @@index([periodId])
+}
