@@ -38,3 +38,24 @@ export function fmtCurrencyUSD(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   return `$${fmtCompact(n)}`;
 }
+
+export type MetricDisplayUnit = "count" | "hours" | "percent" | "currency" | "ratio" | "seconds";
+
+/** Formats a comparison-row value according to its metric unit for display in tables. */
+export function fmtByUnit(n: number | null | undefined, unit: MetricDisplayUnit): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  switch (unit) {
+    case "count":
+      return fmtInt(n);
+    case "hours":
+      return `${fmtInt(n)} h`;
+    case "percent":
+      return fmtPercent(n);
+    case "currency":
+      return fmtCurrencyUSD(n);
+    case "ratio":
+      return n.toFixed(2);
+    case "seconds":
+      return `${Math.round(n)} s`;
+  }
+}

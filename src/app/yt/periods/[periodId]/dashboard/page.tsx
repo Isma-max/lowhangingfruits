@@ -5,7 +5,8 @@ import { db } from "@/lib/yt/db";
 import { YtHeader } from "@/components/yt/YtHeader";
 import { TimeSeriesChart } from "@/components/yt/TimeSeriesChart";
 import { Card, Badge, Button } from "@/components/wemul";
-import { aggregateGeneral, getDailyMetrics, getVideoMetrics, engagementRate, getActiveUpload } from "@/lib/yt/metrics/aggregate";
+import { aggregateGeneral, engagementRate } from "@/lib/yt/metrics/aggregate";
+import { getDailyMetrics, getVideoMetrics, getActiveUpload } from "@/lib/yt/metrics/queries";
 import { resolveComparisonPeriod } from "@/lib/yt/metrics/comparisonPeriod";
 import { compareMetric } from "@/lib/yt/metrics/stats";
 import { fmtCompact, fmtInt, fmtPercent, fmtTrend, fmtCurrencyUSD } from "@/lib/yt/format";
@@ -112,9 +113,11 @@ export default async function DashboardPage({ params }: { params: Promise<{ peri
                 Cargar más datos
               </Button>
             </Link>
-            <Button variant="coral" size="md" disabled title="La exportación a PDF llega en una fase siguiente">
-              Exportar reporte
-            </Button>
+            <Link href={`/yt/periods/${period.id}/report`}>
+              <Button variant="coral" size="md">
+                Ver comparación, hitos y conclusiones
+              </Button>
+            </Link>
           </div>
         </div>
 

@@ -50,9 +50,14 @@ export default async function PeriodDetailPage({ params }: { params: Promise<{ p
               <Button variant="outline">Cargar CSV</Button>
             </Link>
             {hasConfirmedUpload && (
-              <Link href={`/yt/periods/${period.id}/dashboard`}>
-                <Button variant="coral">Ver dashboard</Button>
-              </Link>
+              <>
+                <Link href={`/yt/periods/${period.id}/dashboard`}>
+                  <Button variant="outline">Ver dashboard</Button>
+                </Link>
+                <Link href={`/yt/periods/${period.id}/report`}>
+                  <Button variant="coral">Ver reporte</Button>
+                </Link>
+              </>
             )}
           </div>
         </div>
