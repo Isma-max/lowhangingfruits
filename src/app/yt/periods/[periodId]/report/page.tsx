@@ -126,7 +126,7 @@ export default async function ReportPage({ params }: { params: Promise<{ periodI
         {/* Editable conclusions */}
         <div>
           <h3 style={{ fontFamily: "var(--font-display)", margin: "0 0 var(--space-3)" }}>Conclusiones</h3>
-          <ReportEditor periodId={period.id} defaultName={defaultName} initialConclusions={initialConclusions} />
+          <ReportEditor periodId={period.id} defaultName={defaultName} initialConclusions={initialConclusions} initialReportId={draft?.id ?? null} />
         </div>
       </div>
     </div>

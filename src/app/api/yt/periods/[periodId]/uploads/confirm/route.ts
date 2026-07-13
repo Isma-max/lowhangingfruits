@@ -95,22 +95,76 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ per
     });
 
     if (fileType === "GENERAL") {
+      const aggregated = new Map<string, {
+        views: number;
+        watchTimeHours: number;
+        subscribersGained: number;
+        subscribersLost: number;
+        impressions: number;
+        impressionsCtrSum: number;
+        impressionsCtrCount: number;
+        averageViewDurationSum: number;
+        averageViewDurationCount: number;
+        averageViewPercentageSum: number;
+        averageViewPercentageCount: number;
+        estimatedRevenue: number;
+      }>();
+
       for (const row of report.generalRows) {
         if (!row.date) continue;
+        const d = row.date;
+        const existing = aggregated.get(d) ?? {
+          views: 0,
+          watchTimeHours: 0,
+          subscribersGained: 0,
+          subscribersLost: 0,
+          impressions: 0,
+          impressionsCtrSum: 0,
+          impressionsCtrCount: 0,
+          averageViewDurationSum: 0,
+          averageViewDurationCount: 0,
+          averageViewPercentageSum: 0,
+          averageViewPercentageCount: 0,
+          estimatedRevenue: 0,
+        };
+
+        if (row.views !== null) existing.views += row.views;
+        if (row.watch_time_hours !== null) existing.watchTimeHours += row.watch_time_hours;
+        if (row.subscribers_gained !== null) existing.subscribersGained += row.subscribers_gained;
+        if (row.subscribers_lost !== null) existing.subscribersLost += row.subscribers_lost;
+        if (row.impressions !== null) existing.impressions += row.impressions;
+        if (row.impressions_ctr !== null) {
+          existing.impressionsCtrSum += row.impressions_ctr;
+          existing.impressionsCtrCount++;
+        }
+        if (row.average_view_duration !== null) {
+          existing.averageViewDurationSum += row.average_view_duration;
+          existing.averageViewDurationCount++;
+        }
+        if (row.average_view_percentage !== null) {
+          existing.averageViewPercentageSum += row.average_view_percentage;
+          existing.averageViewPercentageCount++;
+        }
+        if (row.estimated_revenue !== null) existing.estimatedRevenue += row.estimated_revenue;
+
+        aggregated.set(d, existing);
+      }
+
+      for (const [dateStr, values] of aggregated.entries()) {
         await tx.dailyMetric.create({
           data: {
             periodId,
             uploadId: created.id,
-            date: new Date(`${row.date}T00:00:00Z`),
-            views: row.views,
-            watchTimeHours: row.watch_time_hours,
-            subscribersGained: row.subscribers_gained,
-            subscribersLost: row.subscribers_lost,
-            impressions: row.impressions,
-            impressionsCtr: row.impressions_ctr,
-            averageViewDuration: row.average_view_duration,
-            averageViewPercentage: row.average_view_percentage,
-            estimatedRevenue: row.estimated_revenue,
+            date: new Date(`${dateStr}T00:00:00Z`),
+            views: values.views,
+            watchTimeHours: values.watchTimeHours || null,
+            subscribersGained: values.subscribersGained || null,
+            subscribersLost: values.subscribersLost || null,
+            impressions: values.impressions || null,
+            impressionsCtr: values.impressionsCtrCount > 0 ? (values.impressionsCtrSum / values.impressionsCtrCount) : null,
+            averageViewDuration: values.averageViewDurationCount > 0 ? Math.round(values.averageViewDurationSum / values.averageViewDurationCount) : null,
+            averageViewPercentage: values.averageViewPercentageCount > 0 ? (values.averageViewPercentageSum / values.averageViewPercentageCount) : null,
+            estimatedRevenue: values.estimatedRevenue || null,
           },
         });
       }

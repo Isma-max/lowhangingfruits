@@ -10,7 +10,10 @@ async function main() {
 
   const user = await db.user.upsert({
     where: { email },
-    update: {},
+    update: {
+      passwordHash,
+      name,
+    },
     create: { email, name, passwordHash, role: "ADMIN" },
   });
 

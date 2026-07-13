@@ -14,6 +14,7 @@ export interface ParsedPreview {
   delimiter: string;
   fileTypeGuess: FileTypeGuess;
   suggestedMapping: Record<string, CanonicalField | null>;
+  dateRange: { min: string | null; max: string | null };
 }
 
 /** Strips a UTF-8 BOM if present so header detection doesn't choke on it. */
@@ -32,10 +33,8 @@ function guessFileType(mapping: Record<string, CanonicalField | null>): FileType
   const matched = new Set(Object.values(mapping).filter((f): f is CanonicalField => f !== null));
   const hasVideoSignal = matched.has("title") || matched.has("video_id") || matched.has("url");
   const hasDateSeries = matched.has("date");
-  if (hasVideoSignal && !hasDateSeries) return "PER_VIDEO";
-  if (hasDateSeries && !hasVideoSignal) return "GENERAL";
-  if (hasVideoSignal) return "PER_VIDEO";
   if (hasDateSeries) return "GENERAL";
+  if (hasVideoSignal) return "PER_VIDEO";
   return "UNKNOWN";
 }
 
@@ -56,6 +55,29 @@ export function parseCsvPreview(rawText: string, previewRowLimit = 10): ParsedPr
   const suggestedMapping = suggestMapping(headers);
   const fileTypeGuess = guessFileType(suggestedMapping);
 
+  // Find date field to extract date range
+  let dateHeader: string | null = null;
+  const dateField: CanonicalField = fileTypeGuess === "GENERAL" ? "date" : "published_at";
+  for (const [header, canonical] of Object.entries(suggestedMapping)) {
+    if (canonical === dateField) {
+      dateHeader = header;
+      break;
+    }
+  }
+
+  let minDate: string | null = null;
+  let maxDate: string | null = null;
+  if (dateHeader) {
+    const dates = allRows
+      .map((r) => parseFlexibleDate(r[dateHeader!]))
+      .filter((d): d is string => d !== null)
+      .sort();
+    if (dates.length > 0) {
+      minDate = dates[0];
+      maxDate = dates[dates.length - 1];
+    }
+  }
+
   return {
     headers,
     rows: allRows.slice(0, previewRowLimit),
@@ -63,6 +85,7 @@ export function parseCsvPreview(rawText: string, previewRowLimit = 10): ParsedPr
     delimiter,
     fileTypeGuess,
     suggestedMapping,
+    dateRange: { min: minDate, max: maxDate },
   };
 }
 

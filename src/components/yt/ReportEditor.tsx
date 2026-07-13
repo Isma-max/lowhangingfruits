@@ -19,16 +19,20 @@ export function ReportEditor({
   periodId,
   defaultName,
   initialConclusions,
+  initialReportId = null,
 }: {
   periodId: string;
   defaultName: string;
   initialConclusions: ConclusionBlock[];
+  initialReportId?: string | null;
 }) {
   const [name, setName] = React.useState(defaultName);
   const [conclusions, setConclusions] = React.useState<ConclusionBlock[]>(initialConclusions);
   const [saving, setSaving] = React.useState(false);
   const [savedAt, setSavedAt] = React.useState<Date | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [reportId, setReportId] = React.useState<string | null>(initialReportId);
+  const [copied, setCopied] = React.useState(false);
 
   function updateText(id: string, text: string) {
     setConclusions((prev) => prev.map((c) => (c.id === id ? { ...c, text } : c)));
@@ -65,11 +69,32 @@ export function ReportEditor({
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "No se pudo guardar el reporte.");
-        return;
+        return null;
       }
       setSavedAt(new Date());
+      setReportId(data.reportId);
+      return data.reportId as string;
+    } catch {
+      setError("Error al guardar el reporte.");
+      return null;
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function copyShareLink() {
+    let currentId = reportId;
+    if (!currentId) {
+      currentId = await save();
+      if (!currentId) return;
+    }
+    const shareUrl = `${window.location.origin}/share/reports/${currentId}`;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 3000);
+    } catch {
+      setError("No se pudo copiar el enlace automáticamente. Por favor cópialo manualmente: " + shareUrl);
     }
   }
 
@@ -86,7 +111,10 @@ export function ReportEditor({
                 Guardado {savedAt.toLocaleTimeString("es-CL")}
               </span>
             )}
-            <Button variant="coral" onClick={save} disabled={saving}>
+            <Button variant="outline" onClick={copyShareLink} disabled={saving}>
+              {copied ? "¡Enlace copiado! 🔗" : "Compartir 🔗"}
+            </Button>
+            <Button variant="coral" onClick={() => save()} disabled={saving}>
               {saving ? "Guardando…" : "Guardar"}
             </Button>
           </div>
