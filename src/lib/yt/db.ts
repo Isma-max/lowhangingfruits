@@ -4,26 +4,38 @@ declare global {
   var __ytPrisma: PrismaClient | undefined;
 }
 
-function createClient() {
+function createClient(): PrismaClient {
   const url = process.env.DATABASE_URL ?? "";
 
-  // If using PostgreSQL or executing on Vercel, instantiate standard PrismaClient
+  // PostgreSQL path: required on Vercel and any postgres:// URL
+  // Prisma v7 requires an explicit driver adapter — the bare PrismaClient()
+  // constructor no longer has a built-in query engine.
   if (
     url.startsWith("postgres://") ||
     url.startsWith("postgresql://") ||
     process.env.VERCEL
   ) {
-    return new PrismaClient();
+    const { Pool } = require("pg") as typeof import("pg");
+    const { PrismaPg } = require("@prisma/adapter-pg") as typeof import("@prisma/adapter-pg");
+    const pool = new Pool({ connectionString: url });
+    const adapter = new PrismaPg(pool);
+    return new PrismaClient({ adapter });
   }
 
-  // Fallback to SQLite locally
+  // SQLite fallback for local development
   try {
     const { PrismaBetterSqlite3 } = require("@prisma/adapter-better-sqlite3");
-    const adapter = new PrismaBetterSqlite3({ url: url || "file:./prisma/dev.db" });
+    const adapter = new PrismaBetterSqlite3({
+      url: url || "file:./prisma/dev.db",
+    });
     return new PrismaClient({ adapter });
   } catch {
-    // Return standard client if adapter fails to load (e.g. during build pipeline)
-    return new PrismaClient();
+    // Last resort — should not happen in practice
+    const { Pool } = require("pg") as typeof import("pg");
+    const { PrismaPg } = require("@prisma/adapter-pg") as typeof import("@prisma/adapter-pg");
+    const pool = new Pool({ connectionString: url });
+    const adapter = new PrismaPg(pool);
+    return new PrismaClient({ adapter });
   }
 }
 
