@@ -3,3 +3,5 @@ numpy
 opencv-python-headless<4.11
 mediapipe>=0.10
 yt-dlp
+gradio
+pytest

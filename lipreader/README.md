@@ -1,13 +1,19 @@
 # lipreader
 
 A visual speech recognition (lip-reading) prototype: given a VOD (video-on-demand)
-clip and the language its speakers use, it analyzes the video **only** —
-any audio track is never touched — and returns the **3 most likely
-dialogue transcriptions**, ranked by probability.
+clip, it detects the distinct people appearing in it, lets you assign a
+spoken language to each, analyzes the video **only** — any audio track is
+never touched — and returns, per person, the **3 most likely dialogue
+transcriptions**, ranked by probability.
 
 ```
-video (file or URL) → frames → per-frame mouth crop (MediaPipe) → visual model → CTC beam search → top-3 texts
+video (file or URL) → frames → multi-face detection → cluster into "characters" (MediaPipe embeddings)
+   → [UI: assign a language per character] → per-character mouth crop sequence → visual model
+   → CTC beam search → top-3 texts per character
 ```
+
+Character identification is purely visual clustering ("Character 1",
+"Character 2", ...) — it does not know or guess who anyone actually is.
 
 ## Status: pipeline works end-to-end, model is untrained
 
@@ -64,6 +70,19 @@ already bundled in this repo, so no download is needed for that part.
 
 ## Usage
 
+### Web UI (multi-character)
+
+```bash
+PYTHONPATH=src python3 -m lipreader.ui
+```
+
+Opens a local Gradio app: upload a video (or paste a URL), click "1.
+Detectar personajes" to see thumbnails of each distinct person detected,
+pick a language per person, then "2. Transcribir" to get each person's
+top-3 candidate dialogue lines.
+
+### CLI (single speaker, whole video)
+
 ```bash
 PYTHONPATH=src python3 -m lipreader.cli <video-path-or-url> --language es --top-k 3
 # optional: --checkpoint path/to/pretrained_weights.pt
@@ -76,16 +95,25 @@ PYTHONPATH=src python3 -m lipreader.cli <video-path-or-url> --language es --top-
 
 - `src/lipreader/video_source.py` — resolve a local path or URL (via
   `yt-dlp`) to decoded video frames. Audio is never read.
-- `src/lipreader/mouth_roi.py` — per-frame face/mouth detection and
-  cropping via MediaPipe's `FaceLandmarker`.
+- `src/lipreader/detect.py` — shared per-frame face landmark detection
+  (single- or multi-face) via MediaPipe's `FaceLandmarker`.
+- `src/lipreader/mouth_roi.py` — crop a mouth ROI from a frame + its
+  detected landmarks.
+- `src/lipreader/face_cluster.py` — group detected faces across a video
+  into distinct "characters" via MediaPipe `ImageEmbedder` + cosine-similarity
+  clustering (identity-agnostic).
 - `src/lipreader/model.py` — 3D-CNN + BiGRU + CTC visual speech model
   (untrained scaffold; see above).
 - `src/lipreader/decode.py` — CTC prefix beam search, returns top-K ranked
   text candidates instead of a single greedy guess.
 - `src/lipreader/vocab.py` — per-language character vocabularies.
-- `src/lipreader/transcribe.py` / `cli.py` — orchestration and CLI entrypoint.
+- `src/lipreader/transcribe.py` — orchestration: single-speaker (`transcribe`)
+  and multi-character (`discover_characters` + `transcribe_characters`) paths.
+- `src/lipreader/cli.py` — single-speaker CLI entrypoint.
+- `src/lipreader/ui.py` — Gradio UI for the multi-character flow.
 - `scripts/make_synthetic_test_clip.py` — builds the local smoke-test fixture.
-- `tests/test_pipeline_smoke.py` — mechanics tests (not accuracy tests).
+- `tests/test_pipeline_smoke.py`, `tests/test_characters_smoke.py` — mechanics
+  tests (not accuracy tests).
 
 ## Run tests
 

@@ -1,4 +1,4 @@
-"""Per-frame mouth region-of-interest extraction using MediaPipe FaceLandmarker.
+"""Mouth region-of-interest cropping from already-detected face landmarks.
 
 MediaPipe's 478-point face mesh assigns fixed indices to lip contour points
 regardless of image content; this is the standard canonical set used to
@@ -10,17 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import cv2
-import mediapipe as mp
 import numpy as np
-from mediapipe.tasks.python import BaseOptions
-from mediapipe.tasks.python.vision import (
-    FaceLandmarker,
-    FaceLandmarkerOptions,
-    RunningMode,
-)
 
-_ASSET_DIR = Path(__file__).resolve().parent.parent.parent / "assets"
-DEFAULT_MODEL_PATH = _ASSET_DIR / "face_landmarker.task"
+from .detect import DEFAULT_MODEL_PATH, DetectedFace, detect_faces_in_frames
 
 LIP_LANDMARK_INDICES = sorted(
     {
@@ -34,65 +26,33 @@ LIP_LANDMARK_INDICES = sorted(
 )
 
 
-class MouthRoiExtractor:
-    def __init__(self, model_path: Path = DEFAULT_MODEL_PATH, roi_size: int = 96, margin: float = 0.35):
-        if not Path(model_path).is_file():
-            raise FileNotFoundError(
-                f"FaceLandmarker model not found at {model_path}. "
-                "Expected it bundled under lipreader/assets/."
-            )
-        options = FaceLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path=str(model_path)),
-            running_mode=RunningMode.VIDEO,
-            num_faces=1,
-        )
-        self._landmarker = FaceLandmarker.create_from_options(options)
-        self.roi_size = roi_size
-        self.margin = margin
+def crop_mouth(
+    frame_bgr: np.ndarray,
+    landmarks_xy: list[tuple[float, float]],
+    roi_size: int = 96,
+    margin: float = 0.35,
+) -> np.ndarray | None:
+    """Crop+resize a grayscale mouth ROI given a frame and its face landmarks."""
+    height, width = frame_bgr.shape[:2]
+    xs = [landmarks_xy[i][0] for i in LIP_LANDMARK_INDICES]
+    ys = [landmarks_xy[i][1] for i in LIP_LANDMARK_INDICES]
+    x_min, x_max = min(xs) * width, max(xs) * width
+    y_min, y_max = min(ys) * height, max(ys) * height
 
-    def close(self) -> None:
-        self._landmarker.close()
+    w, h = x_max - x_min, y_max - y_min
+    cx, cy = (x_min + x_max) / 2, (y_min + y_max) / 2
+    side = max(w, h) * (1.0 + margin)
 
-    def __enter__(self) -> "MouthRoiExtractor":
-        return self
+    x0 = int(max(cx - side / 2, 0))
+    y0 = int(max(cy - side / 2, 0))
+    x1 = int(min(cx + side / 2, width))
+    y1 = int(min(cy + side / 2, height))
+    if x1 <= x0 or y1 <= y0:
+        return None
 
-    def __exit__(self, *exc) -> None:
-        self.close()
-
-    def _mouth_bbox(self, landmarks, width: int, height: int) -> tuple[int, int, int, int]:
-        xs = [landmarks[i].x for i in LIP_LANDMARK_INDICES]
-        ys = [landmarks[i].y for i in LIP_LANDMARK_INDICES]
-        x_min, x_max = min(xs) * width, max(xs) * width
-        y_min, y_max = min(ys) * height, max(ys) * height
-
-        w, h = x_max - x_min, y_max - y_min
-        cx, cy = (x_min + x_max) / 2, (y_min + y_max) / 2
-        side = max(w, h) * (1.0 + self.margin)
-
-        x0 = int(max(cx - side / 2, 0))
-        y0 = int(max(cy - side / 2, 0))
-        x1 = int(min(cx + side / 2, width))
-        y1 = int(min(cy + side / 2, height))
-        return x0, y0, x1, y1
-
-    def extract(self, frame_bgr: np.ndarray, timestamp_ms: int) -> np.ndarray | None:
-        """Return a (roi_size, roi_size) grayscale mouth crop, or None if no face found."""
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        result = self._landmarker.detect_for_video(mp_image, timestamp_ms)
-        if not result.face_landmarks:
-            return None
-
-        landmarks = result.face_landmarks[0]
-        height, width = frame_bgr.shape[:2]
-        x0, y0, x1, y1 = self._mouth_bbox(landmarks, width, height)
-        if x1 <= x0 or y1 <= y0:
-            return None
-
-        crop = frame_bgr[y0:y1, x0:x1]
-        crop = cv2.resize(crop, (self.roi_size, self.roi_size), interpolation=cv2.INTER_AREA)
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        return gray
+    crop = frame_bgr[y0:y1, x0:x1]
+    crop = cv2.resize(crop, (roi_size, roi_size), interpolation=cv2.INTER_AREA)
+    return cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
 
 
 def extract_mouth_sequence(
@@ -101,19 +61,20 @@ def extract_mouth_sequence(
     model_path: Path = DEFAULT_MODEL_PATH,
     roi_size: int = 96,
 ) -> np.ndarray:
-    """Run mouth ROI extraction over a list of frames.
+    """Single-speaker convenience path: detect the (one) face per frame and crop its mouth.
 
-    Frames where no face is detected are dropped (VOD footage is assumed to
-    keep the speaker's face on screen for the whole segment being analyzed).
-    Returns an array of shape (T, roi_size, roi_size), dtype uint8.
+    Frames where no face is detected are dropped. Returns shape (T, roi_size, roi_size), uint8.
+    For multi-speaker VOD, use `detect.detect_faces_in_frames` + `face_cluster` + `crop_mouth`
+    instead (see transcribe.transcribe_characters).
     """
-    ms_per_frame = 1000.0 / fps if fps > 0 else 40.0
+    per_frame_faces = detect_faces_in_frames(frames, fps=fps, max_faces=1, model_path=model_path)
     rois = []
-    with MouthRoiExtractor(model_path=model_path, roi_size=roi_size) as extractor:
-        for i, frame in enumerate(frames):
-            roi = extractor.extract(frame, timestamp_ms=int(i * ms_per_frame))
-            if roi is not None:
-                rois.append(roi)
+    for frame, faces in zip(frames, per_frame_faces):
+        if not faces:
+            continue
+        roi = crop_mouth(frame, faces[0].landmarks_xy, roi_size=roi_size)
+        if roi is not None:
+            rois.append(roi)
     if not rois:
         raise RuntimeError("No face/mouth detected in any frame of the input video.")
     return np.stack(rois, axis=0)
