@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VisionMVPCore
 
 /// Dynamic sub-tests: the participant freely moves the phone through the
@@ -8,7 +9,10 @@ import VisionMVPCore
 /// of (distance, size, angle, correct, RT) trials at whatever distance the
 /// participant happens to be at each time (brief objective #3: comparing
 /// `.dynamicConstantAngularSize` vs `.dynamicFixedPhysicalSize` runs is what
-/// answers "does rescaling matter").
+/// answers "does rescaling matter"). The whole run is also logged
+/// frame-by-frame via `DistanceRunRecorder`, and a trial is only scored
+/// toward the exported data as `valid` when the quality gate accepted the
+/// frame it was answered on.
 struct DynamicTrialView: View {
     var taskPhase: TaskPhase
     var eyeCondition: EyeCondition
@@ -16,17 +20,20 @@ struct DynamicTrialView: View {
     var targetAngularSizeArcMinutes: Double
     var fixedPhysicalSizeMillimeters: Double
     var trialCount: Int
+    var sessionID: UUID?
     @ObservedObject var testSession: VisionTestSession
     var onFinish: () -> Void
 
     @EnvironmentObject private var faceTrackingSession: FaceTrackingSession
+    @StateObject private var recorder = DistanceRunRecorder()
 
     @State private var trialIndex = 0
-    @State private var currentTruth: GapOrientation = GapOrientation.allDirectionsClockwise.randomElement()!
-    @State private var currentSizeMm: Double = 5
+    @State private var currentTruth: GapOrientation = GapOrientation.cardinalDirections.randomElement()!
+    @State private var currentTotalHeightMm: Double = 5
     @State private var currentDistanceMeters: Double = .nan
     @State private var presentedAt = Date()
     @State private var finished = false
+    @State private var exportMessage: String?
 
     var body: some View {
         VStack(spacing: 20) {
@@ -50,23 +57,29 @@ struct DynamicTrialView: View {
                 VStack(spacing: 12) {
                     Text("Prueba completa").font(.title3.bold())
                     Text("Ensayos registrados: \(trialIndex)").font(.footnote).foregroundStyle(.secondary)
+                    if let exportMessage {
+                        Text(exportMessage).font(.footnote).foregroundStyle(.orange)
+                    }
                     Button("Volver") { onFinish() }
                         .buttonStyle(.borderedProminent)
                 }
             } else {
-                StimulusView(gapOrientation: currentTruth, sizePoints: ScreenGeometryHelper.pointsForMillimeters(currentSizeMm))
-                    .frame(height: 160)
+                StimulusView(
+                    gapOrientation: currentTruth,
+                    sizePoints: ScreenGeometryHelper.pointsForMillimeters(currentTotalHeightMm)
+                )
+                .frame(height: 160)
 
                 Text("¿Hacia dónde apunta la abertura del anillo? Toca la flecha correspondiente.")
                     .font(.subheadline.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
 
-                GapDirectionResponsePad { response in
+                GapDirectionResponsePad(orientations: GapOrientation.cardinalDirections) { response in
                     respond(response)
                 }
 
-                Button("Detener") { finished = true }
+                Button("Detener") { finish() }
                     .buttonStyle(.bordered)
                     .tint(.red)
             }
@@ -75,18 +88,27 @@ struct DynamicTrialView: View {
         }
         .padding()
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { presentTrial() }
+        .onAppear {
+            recorder.startRecording(on: faceTrackingSession)
+            presentTrial()
+        }
+        .onDisappear {
+            recorder.stopRecording()
+            exportDistanceFrames()
+        }
     }
 
     private func presentTrial() {
         let distance = faceTrackingSession.latestSample?.distanceToFaceMeters ?? .nan
         currentDistanceMeters = distance
         if taskPhase == .dynamicConstantAngularSize, distance.isFinite, distance > 0 {
-            currentSizeMm = StimulusScaler.physicalSizeMillimeters(targetAngularSizeArcMinutes: targetAngularSizeArcMinutes, distanceMeters: distance)
+            currentTotalHeightMm = StimulusScaler.physicalSizeMillimeters(
+                targetAngularSizeArcMinutes: targetAngularSizeArcMinutes, distanceMeters: distance
+            )
         } else {
-            currentSizeMm = fixedPhysicalSizeMillimeters
+            currentTotalHeightMm = fixedPhysicalSizeMillimeters
         }
-        currentTruth = GapOrientation.allDirectionsClockwise.randomElement()!
+        currentTruth = GapOrientation.cardinalDirections.randomElement()!
         presentedAt = Date()
     }
 
@@ -94,9 +116,13 @@ struct DynamicTrialView: View {
         guard !finished else { return }
         let reactionTimeMs = Date().timeIntervalSince(presentedAt) * 1000
         let correct = response == currentTruth
-        let angularSize = currentDistanceMeters.isFinite && currentDistanceMeters > 0
-            ? StimulusScaler.angularSizeArcMinutes(physicalSizeMillimeters: currentSizeMm, distanceMeters: currentDistanceMeters)
-            : .nan
+        let sample = faceTrackingSession.latestSample
+        let measurementDistance = (currentDistanceMeters.isFinite && currentDistanceMeters > 0) ? currentDistanceMeters : 0.4
+        let geometry = StimulusScaler.measurement(totalHeightMillimeters: currentTotalHeightMm, distanceMeters: measurementDistance)
+        let totalHeightPoints = ScreenGeometryHelper.pointsForMillimeters(currentTotalHeightMm)
+
+        let frameValid = recorder.latestFrame?.valid ?? false
+        let discardReason = recorder.latestFrame?.discardReason
 
         testSession.record(VisionTrialRecord(
             taskPhase: taskPhase,
@@ -105,21 +131,51 @@ struct DynamicTrialView: View {
             trialIndex: trialIndex,
             timestampISO8601: ISO8601DateFormatter().string(from: Date()),
             distanceMeters: currentDistanceMeters,
-            physicalSizeMillimeters: currentSizeMm,
-            angularSizeArcMinutes: angularSize,
+            accommodativeDemandDiopters: currentDistanceMeters.isFinite && currentDistanceMeters > 0
+                ? AccommodativeDemand.diopters(distanceMeters: currentDistanceMeters) : .nan,
+            geometry: geometry,
+            totalHeightPoints: totalHeightPoints,
+            totalHeightPixels: totalHeightPoints * Double(UIScreen.main.scale),
             gapOrientationTruth: currentTruth,
             response: response,
             correct: correct,
             reactionTimeMilliseconds: reactionTimeMs,
             isReversal: false,
-            stepSize: 0
+            stepSize: 0,
+            yawDegrees: sample?.yawDegrees ?? .nan,
+            pitchDegrees: sample?.pitchDegrees ?? .nan,
+            rollDegrees: sample?.rollDegrees ?? .nan,
+            faceTracked: sample?.isFaceTracked ?? false,
+            worldTrackingState: sample?.worldTrackingState.exportValue ?? "not_available",
+            valid: frameValid,
+            discardReason: discardReason,
+            staircaseAlgorithm: "none"
         ))
 
         trialIndex += 1
         if trialIndex >= trialCount {
-            finished = true
+            finish()
         } else {
             presentTrial()
+        }
+    }
+
+    private func finish() {
+        guard !finished else { return }
+        finished = true
+        recorder.stopRecording()
+        exportDistanceFrames()
+    }
+
+    private func exportDistanceFrames() {
+        guard let sessionID else { return }
+        let filename = taskPhase == .dynamicConstantAngularSize
+            ? "distance_frames_dynamic_constant_angular.csv"
+            : "distance_frames_dynamic_fixed_physical.csv"
+        do {
+            try FileStore.writeCSV(recorder.frames, filename: filename, sessionID: sessionID)
+        } catch {
+            exportMessage = "Error al guardar trayectoria: \(error.localizedDescription)"
         }
     }
 }

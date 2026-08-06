@@ -22,12 +22,22 @@ final class DistanceRunRecorder: ObservableObject {
 
     @Published private(set) var isRecording = false
     @Published private(set) var liveStats = LiveStats()
-    @Published private(set) var frames: [DistanceFrameRecord] = []
+    /// Not `@Published`: this can grow into the thousands of rows during a
+    /// long run, and nothing needs a live UI update per-frame from the raw
+    /// array — only the throttled `liveStats` below does. Publishing this on
+    /// every ~30-60Hz ARKit frame was a real jank risk (encargo Fase 1 §1.4).
+    private(set) var frames: [DistanceFrameRecord] = []
 
     var thresholds: QualityThresholds = .default
     var currentMilestoneCentimeters: Double?
     var currentRepetition: Int?
     var currentReferenceDistanceCentimeters: Double?
+
+    /// The most recently ingested frame, updated every frame regardless of
+    /// the `liveStats` publish throttle below — callers that need to gate a
+    /// single event (e.g. "was tracking good enough right now to score this
+    /// trial?") should read this instead of waiting on a throttled publish.
+    private(set) var latestFrame: DistanceFrameRecord?
 
     private var cancellable: AnyCancellable?
     private var runStartFrameTimestamp: TimeInterval?
@@ -35,15 +45,21 @@ final class DistanceRunRecorder: ObservableObject {
     private var recentValidityFlags: [(timestamp: TimeInterval, valid: Bool)] = []
     private var runningValidCount = 0
     private var runningInvalidCount = 0
+    private var lastPublishedStatsElapsedSeconds: TimeInterval?
+    /// UI redraws from `liveStats` at most this often; per-frame quality
+    /// gating (`latestFrame`, `frames`) is unaffected and stays exact.
+    private let statsPublishIntervalSeconds: TimeInterval = 0.1
     private let isoFormatter = ISO8601DateFormatter()
 
     func startRecording(on session: FaceTrackingSession) {
         frames = []
+        latestFrame = nil
         recentDistanceSamples = []
         recentValidityFlags = []
         runningValidCount = 0
         runningInvalidCount = 0
         runStartFrameTimestamp = nil
+        lastPublishedStatsElapsedSeconds = nil
         liveStats = LiveStats()
         isRecording = true
 
@@ -112,6 +128,7 @@ final class DistanceRunRecorder: ObservableObject {
             referenceDistanceCentimeters: currentReferenceDistanceCentimeters
         )
         frames.append(record)
+        latestFrame = record
 
         if valid, let distance = sample.distanceToFaceMeters {
             recentDistanceSamples.append(TimestampedValue(timestamp: elapsedSeconds, value: distance))
@@ -124,6 +141,13 @@ final class DistanceRunRecorder: ObservableObject {
         let cutoff = elapsedSeconds - retentionWindowSeconds
         recentDistanceSamples.removeAll { $0.timestamp < cutoff }
         recentValidityFlags.removeAll { $0.timestamp < cutoff }
+
+        // Throttle the @Published UI-facing stats to ~10Hz regardless of the
+        // ~30-60Hz ARKit frame rate (encargo Fase 1 §1.4: avoid blocking the
+        // interface). Per-frame validity above is never throttled.
+        let shouldPublish = lastPublishedStatsElapsedSeconds.map { elapsedSeconds - $0 >= statsPublishIntervalSeconds } ?? true
+        guard shouldPublish else { return }
+        lastPublishedStatsElapsedSeconds = elapsedSeconds
 
         liveStats = LiveStats(
             window1s: recentWindow1s,

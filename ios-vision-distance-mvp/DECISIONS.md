@@ -158,10 +158,15 @@ Con eso:
 Se dibuja como una `Shape` vectorial de SwiftUI (proporción estándar: hueco
 = grosor del trazo = 1/5 del diámetro exterior), no con una fuente de
 letras — da control geométrico exacto del tamaño físico y evita depender de
-licencias de fuente. La orientación del hueco (`GapOrientation`, 8
-alternativas) se define en `VisionMVPCore` en términos de brújula (0° =
-arriba, sentido horario) y se convierte al ángulo de `Path.addArc` de
-SwiftUI dentro de `LandoltCShape`.
+licencias de fuente. La orientación del hueco (`GapOrientation`) se define
+en `VisionMVPCore` en términos de brújula (0° = arriba, sentido horario) y
+se convierte al ángulo de `Path.addArc` de SwiftUI dentro de
+`LandoltCShape`. El tipo sigue soportando 8 alternativas, pero desde Fase 1
+las pantallas de test (`StaticBaselineTrialView`, `DynamicTrialView`) solo
+usan `GapOrientation.cardinalDirections` (arriba/abajo/izquierda/derecha)
+— el encargo pide reducir a 4 para la fase de estabilización, y mantener las
+8 en el tipo (en vez de eliminarlas) deja la puerta abierta a usarlas de
+nuevo sin tocar el esquema de datos.
 
 **No verificado visualmente en pantalla** (este entorno no puede renderizar
 SwiftUI): la correspondencia exacta entre `GapOrientation.up` y "el hueco se
@@ -173,22 +178,108 @@ Haz una comprobación visual rápida la primera vez que corras la app en un
 dispositivo y ajusta el offset en `LandoltCShape.swift` si el hueco no
 aparece donde dice la etiqueta.
 
+### Altura total vs. detalle crítico (MAR)
+
+`physical_size_mm`/`angular_size_arcmin` (esquema v1) representaban el
+**diámetro total** del anillo, no el detalle crítico — la auditoría de Fase 0
+(`CURRENT_STATE_AUDIT.md`) identificó que esto llevaba a confundir el ángulo
+total con el MAR, exactamente lo que el encargo advierte no asumir. Desde
+Fase 1, `OptotypeGeometry` separa ambos explícitamente:
+
+```
+detalle_crítico_mm = altura_total_mm / 5
+```
+
+y `StimulusScaler.measurement(totalHeightMillimeters:distanceMeters:)`
+calcula, en un solo lugar probado por tests, tanto el ángulo de la altura
+total como el ángulo del detalle crítico — este último es el que
+corresponde al MAR:
+
+```
+MAR_arcmin = ángulo_angular(detalle_crítico_mm, distancia_m)
+logMAR = log10(MAR_arcmin)
+```
+
+`vision_trials.csv` (esquema v2, ver más abajo) exporta ambos ángulos por
+separado, nunca uno en lugar del otro.
+
 ## Protocolo psicofísico (staircase)
 
-`StaircaseController` implementa un staircase simple 1-arriba/1-abajo (el
-tamaño baja tras un acierto, sube tras un error, con el paso reduciéndose a
-la mitad en cada reverso hasta un mínimo configurable). Converge cerca del
-punto de ~50% de aciertos. **No es un protocolo psicofísico clínicamente
-validado** — es una simplificación deliberada y documentada, adecuada para
-un estudio de viabilidad con 30–40 personas, no para generar un umbral
-clínico definitivo.
+`StaircaseController` implementa un staircase N-abajo/M-arriba genérico: el
+tamaño baja tras `correctsRequiredToDecrease` aciertos consecutivos, sube
+tras `incorrectsRequiredToIncrease` errores consecutivos, con el paso
+reduciéndose a la mitad en cada reverso hasta un mínimo configurable. El
+valor por defecto de estos dos parámetros es **2-abajo/1-arriba** (converge
+cerca del 70.7% de aciertos), tal como pide el encargo de Fase 2 Test A —
+1-abajo/1-arriba (converge cerca del 50%) sigue disponible pasando
+`correctsRequiredToDecrease: 1` explícitamente, y así quedaron los tests que
+ya existían antes de este cambio. **Sigue sin ser un protocolo
+psicofísico clínicamente validado más allá de esta elección de N/M** —
+la calibración fina contra un examen profesional es trabajo de Fase 4.
+
+## Demanda acomodativa
+
+`AccommodativeDemand.diopters(distanceMeters:)` implementa
+`D = 1 / distancia_m` tal cual la especifica el encargo, sin ningún ajuste
+por vergencia u otro refinamiento óptico. Se calcula y exporta por ensayo en
+`vision_trials.csv` (columna `accommodative_demand_d`).
+
+## Versionado
+
+`InstrumentVersions` (en `VisionMVPCore`) centraliza `protocolVersion` y
+`geometryVersion`; `StaircaseConfiguration.algorithmIdentifier` deriva el
+identificador del algoritmo (p. ej. `"2down1up"`) directamente de la
+configuración usada en cada corrida, en vez de vivir como una constante
+separada que podría desincronizarse. Los tres valores se exportan por fila
+en `vision_trials.csv`. Esto es deliberadamente mínimo (no hay todavía
+versión de calibración de pantalla, porque `DisplayCalibrationService` aún
+no existe — ver `CURRENT_STATE_AUDIT.md` §5, decisión pendiente #9) y se
+ampliará cuando se agregue.
+
+## Gating de estabilidad y de calidad en los ensayos de agudeza
+
+Antes de Fase 1, ni `StaticBaselineTrialView` ni `DynamicTrialView` verificaban
+nada sobre la distancia o la calidad del tracking antes de aceptar una
+respuesta — el CSV de la primera prueba en dispositivo reflejó esto
+directamente (sesión etiquetada `static_baseline` con distancia variando
+44.6–69.8cm). Desde Fase 1:
+
+- **`StaticBaselineTrialView`** exige 38–42cm sostenidos durante ≥500ms
+  antes de presentar cada ensayo (`handle(_:)`); si el participante sale de
+  ese rango mientras el estímulo está en pantalla, la vista vuelve a
+  "settling" sin puntuar ese ensayo. La distancia objetivo (40cm) y la
+  tolerancia (±2cm) son constantes en el archivo, ajustables si el piloto
+  clínico sugiere otro rango.
+- Ambas vistas ahora corren un `DistanceRunRecorder` durante toda la prueba
+  (no solo un punto de distancia por respuesta), y solo un ensayo cuyo
+  `recorder.latestFrame?.valid == true` en el instante de la respuesta
+  alimenta el staircase o se cuenta hacia el resultado — un ensayo con mala
+  calidad de tracking se sigue registrando (con `valid = false` y
+  `discard_reason`), nunca se descarta en silencio, pero tampoco puede mover
+  el umbral.
+- La trayectoria completa de cada corrida se exporta como un CSV compañero
+  (`distance_frames_static_baseline.csv`,
+  `distance_frames_dynamic_constant_angular.csv`,
+  `distance_frames_dynamic_fixed_physical.csv`), reutilizando el mismo
+  esquema `DistanceFrameRecord` que ya usaban el Módulo de Distancia y el
+  cruce claro/borroso.
+
+## Rendimiento: publicación de `DistanceRunRecorder`
+
+`frames` dejó de ser `@Published` (una corrida larga puede acumular miles de
+filas; nada necesita actualizarse en vivo desde el arreglo crudo). `liveStats`
+sigue siendo `@Published` pero ahora se publica como máximo cada 100ms
+(~10Hz) en vez de en cada frame de ARKit (~30-60Hz) — el gating de calidad
+por frame (`latestFrame`, usado por las vistas de ensayo para decidir
+validez) no se ve afectado por este throttling, solo la UI en vivo.
 
 ## Estructura de las cuatro sub-pruebas del módulo de test visual
 
 - **Basal a distancia fija** (`staticBaseline`): el participante sostiene el
-  teléfono a una distancia estable; el staircase controla el **tamaño
-  físico** (mm) directamente. Es la variable "simple" de comparación
-  (objetivo #4 del encargo).
+  teléfono a una distancia estable (con gating activo desde Fase 1, ver
+  arriba); el staircase controla la **altura total** del anillo (mm)
+  directamente. Es la variable "simple" de comparación (objetivo #4 del
+  encargo).
 - **Dinámica, ángulo constante** (`dynamicConstantAngularSize`) y
   **dinámica, tamaño fijo** (`dynamicFixedPhysicalSize`): el participante
   mueve el teléfono libremente; la app no controla la distancia (la controla
@@ -196,12 +287,18 @@ clínico definitivo.
   presentan ensayos de elección forzada repetidos, registrando en cada uno
   la distancia real en ese instante. Comparar ambos modos entre sí es lo que
   responde el objetivo #3 ("¿qué ocurre si el estímulo cambia de tamaño?").
+  Nota: esto todavía no es el "Test B: punto próximo dinámico" completo del
+  nuevo encargo (recorrido con marca de borroso/claro + verificación +
+  histéresis) — eso vive en `BlurCrossingTrialView`, pendiente de
+  reescritura (`CURRENT_STATE_AUDIT.md` §5, decisión pendiente #4).
 - **Cruce claro/borroso** (`blurCrossing`): estímulo de tamaño fijo, el
   participante marca con un toque el instante en que su percepción cruza
   entre claro y borroso mientras mueve el teléfono, con la trayectoria
   completa de distancia registrada en paralelo (reutilizando
   `DistanceRunRecorder`, el mismo pipeline del módulo de distancia).
-  Responde al objetivo #2.
+  Responde al objetivo #2. **Sin cambios en esta entrega** — sigue sin el
+  paso de "verificación mediante optotipo aleatorio" que pide el protocolo
+  completo de Test B; ver decisión pendiente #4 en el audit.
 
 ## Por qué no se genera un .xcodeproj a mano
 

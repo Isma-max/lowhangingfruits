@@ -35,6 +35,12 @@ public enum GapOrientation: String, Codable, Sendable, CaseIterable {
         .up, .upRight, .right, .downRight, .down, .downLeft, .left, .upLeft,
     ]
 
+    /// The 4 cardinal directions only (no diagonals) — the default
+    /// orientation set for the stabilization-phase acuity tests (encargo
+    /// §1.1: less perceptually ambiguous, the conventional choice for
+    /// Landolt C / Tumbling E acuity testing).
+    public static let cardinalDirections: [GapOrientation] = [.up, .down, .left, .right]
+
     public var rotationDegrees: Double {
         switch self {
         case .up: return 0

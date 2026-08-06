@@ -8,6 +8,9 @@ import VisionMVPCore
 /// studied.
 struct GapDirectionResponsePad: View {
     var onSelect: (GapOrientation) -> Void
+    /// Which buttons to show, e.g. `GapOrientation.cardinalDirections` for
+    /// the stabilization-phase acuity tests. Defaults to all 8.
+    var orientations: [GapOrientation] = GapOrientation.allDirectionsClockwise
 
     private let grid: [[GapOrientation?]] = [
         [.upLeft, .up, .upRight],
@@ -20,7 +23,7 @@ struct GapDirectionResponsePad: View {
             ForEach(0..<grid.count, id: \.self) { row in
                 HStack(spacing: 12) {
                     ForEach(0..<grid[row].count, id: \.self) { column in
-                        if let orientation = grid[row][column] {
+                        if let orientation = grid[row][column], orientations.contains(orientation) {
                             Button {
                                 onSelect(orientation)
                             } label: {

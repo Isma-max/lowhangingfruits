@@ -48,3 +48,46 @@ public enum StimulusScaler {
         radians * 180.0 / .pi * 60.0
     }
 }
+
+/// Full optotype measurement for one presentation: total height and its
+/// critical detail (the 1/5-scale gap/stroke), each converted to an angular
+/// size at the viewing distance, plus MAR/logMAR — computed from the
+/// critical-detail angle, never the total-height angle (see
+/// `VisualAcuityMath`'s warning). This is the single place trial views
+/// should go to avoid re-deriving the total-vs-critical distinction ad hoc.
+public struct OptotypeMeasurement: Sendable {
+    public var totalHeightMillimeters: Double
+    public var criticalDetailMillimeters: Double
+    public var totalAngularSizeArcMinutes: Double
+    public var marArcMinutes: Double
+    public var logMAR: Double
+
+    public init(
+        totalHeightMillimeters: Double,
+        criticalDetailMillimeters: Double,
+        totalAngularSizeArcMinutes: Double,
+        marArcMinutes: Double,
+        logMAR: Double
+    ) {
+        self.totalHeightMillimeters = totalHeightMillimeters
+        self.criticalDetailMillimeters = criticalDetailMillimeters
+        self.totalAngularSizeArcMinutes = totalAngularSizeArcMinutes
+        self.marArcMinutes = marArcMinutes
+        self.logMAR = logMAR
+    }
+}
+
+extension StimulusScaler {
+    public static func measurement(totalHeightMillimeters: Double, distanceMeters: Double) -> OptotypeMeasurement {
+        let criticalDetail = OptotypeGeometry.criticalDetail(totalHeight: totalHeightMillimeters)
+        let totalAngle = angularSizeArcMinutes(physicalSizeMillimeters: totalHeightMillimeters, distanceMeters: distanceMeters)
+        let marAngle = angularSizeArcMinutes(physicalSizeMillimeters: criticalDetail, distanceMeters: distanceMeters)
+        return OptotypeMeasurement(
+            totalHeightMillimeters: totalHeightMillimeters,
+            criticalDetailMillimeters: criticalDetail,
+            totalAngularSizeArcMinutes: totalAngle,
+            marArcMinutes: marAngle,
+            logMAR: VisualAcuityMath.logMAR(marArcMinutes: marAngle)
+        )
+    }
+}

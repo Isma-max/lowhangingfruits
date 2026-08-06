@@ -35,6 +35,7 @@ struct VisionTestSetupView: View {
                 StaticBaselineTrialView(
                     eyeCondition: eyeCondition,
                     correctionUsed: correctionUsed,
+                    sessionID: draft.persistedSessionID,
                     testSession: testSession,
                     onFinish: { phase = .setup }
                 )
@@ -46,6 +47,7 @@ struct VisionTestSetupView: View {
                     targetAngularSizeArcMinutes: targetAngularSizeArcMinutes,
                     fixedPhysicalSizeMillimeters: fixedPhysicalSizeMillimeters,
                     trialCount: dynamicTrialCount,
+                    sessionID: draft.persistedSessionID,
                     testSession: testSession,
                     onFinish: { phase = .setup }
                 )

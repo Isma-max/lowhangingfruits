@@ -76,35 +76,64 @@ final class CSVExportTests: XCTestCase {
         XCTAssertEqual(CSVFormatting.field("a\nb"), "\"a\nb\"")
     }
 
-    func testVisionTrialRecordHeaderMatchesFieldCount() {
-        let record = VisionTrialRecord(
+    private func makeTrialRecord(
+        distanceMeters: Double = 0.35,
+        totalHeightMillimeters: Double = 4.2,
+        response: GapOrientation?,
+        correct: Bool = false
+    ) -> VisionTrialRecord {
+        let geometry = StimulusScaler.measurement(totalHeightMillimeters: totalHeightMillimeters, distanceMeters: distanceMeters)
+        return VisionTrialRecord(
             taskPhase: .dynamicConstantAngularSize,
             eyeCondition: .oculusDexter,
             correctionUsed: true,
             trialIndex: 3,
             timestampISO8601: "2026-08-06T10:05:00Z",
-            distanceMeters: 0.35,
-            physicalSizeMillimeters: 4.2,
-            angularSizeArcMinutes: 20,
+            distanceMeters: distanceMeters,
+            accommodativeDemandDiopters: AccommodativeDemand.diopters(distanceMeters: distanceMeters),
+            geometry: geometry,
+            totalHeightPoints: 30.0,
+            totalHeightPixels: 90.0,
             gapOrientationTruth: .right,
-            response: .down,
-            correct: false,
+            response: response,
+            correct: correct,
             reactionTimeMilliseconds: 812,
             isReversal: true,
-            stepSize: 1.5
+            stepSize: 1.5,
+            yawDegrees: 2.0,
+            pitchDegrees: -1.0,
+            rollDegrees: 0.5,
+            faceTracked: true,
+            worldTrackingState: "normal",
+            valid: true,
+            discardReason: nil,
+            staircaseAlgorithm: "2down1up"
         )
+    }
+
+    func testVisionTrialRecordHeaderMatchesFieldCount() {
+        let record = makeTrialRecord(response: .down)
         XCTAssertEqual(record.csvFields().count, VisionTrialRecord.csvHeader.count)
         XCTAssertEqual(record.csvFields()[VisionTrialRecord.csvHeader.firstIndex(of: "response")!], "down")
     }
 
     func testVisionTrialRecordWithNilResponseLeavesEmptyField() {
-        let record = VisionTrialRecord(
-            taskPhase: .staticBaseline, eyeCondition: .oculusUterque, correctionUsed: false,
-            trialIndex: 1, timestampISO8601: "t", distanceMeters: 0.4, physicalSizeMillimeters: 5,
-            angularSizeArcMinutes: 20, gapOrientationTruth: .up, response: nil, correct: false,
-            reactionTimeMilliseconds: 0, isReversal: false, stepSize: 1
-        )
+        let record = makeTrialRecord(response: nil)
         XCTAssertEqual(record.csvFields()[VisionTrialRecord.csvHeader.firstIndex(of: "response")!], "")
+    }
+
+    func testVisionTrialRecordSeparatesTotalHeightFromCriticalDetailInCSV() {
+        let record = makeTrialRecord(totalHeightMillimeters: 25, response: .up)
+        let totalHeightField = record.csvFields()[VisionTrialRecord.csvHeader.firstIndex(of: "total_height_mm")!]
+        let criticalDetailField = record.csvFields()[VisionTrialRecord.csvHeader.firstIndex(of: "critical_detail_mm")!]
+        XCTAssertEqual(totalHeightField, "25.0")
+        XCTAssertEqual(criticalDetailField, "5.0")
+    }
+
+    func testVisionTrialRecordDefaultsToCurrentVersions() {
+        let record = makeTrialRecord(response: .up)
+        XCTAssertEqual(record.protocolVersion, InstrumentVersions.protocolVersion)
+        XCTAssertEqual(record.geometryVersion, InstrumentVersions.geometryVersion)
     }
 
     func testBlurCrossingRecordFields() {
