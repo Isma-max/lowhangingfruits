@@ -60,6 +60,14 @@ Antes de correr en un dispositivo:
 2. Conecta un iPhone con TrueDepth por cable o Wi-Fi y selecciónalo como
    destino de ejecución (no el simulador).
 
+## Flujo de la app (versión simplificada)
+
+Un único camino: Inicio → "Comenzar test visual" → explicación con demo →
+práctica de 4 figuras → posicionamiento a ~40 cm → cuenta regresiva 3-2-1 →
+test de máximo 60 segundos efectivos → resultado (completada / aproximada /
+no concluyente). El módulo de caracterización de distancia fue eliminado de
+la interfaz; la medición TrueDepth sigue funcionando por debajo.
+
 ## Estructura
 
 ```
@@ -67,18 +75,19 @@ ios-vision-distance-mvp/
   Package.swift                    — paquete Swift local, sin dependencias de Apple
   Sources/VisionMVPCore/           — toda la lógica pura y testeable
     Geometry/                      — Matrix4x4, Vector3 (sin `simd`)
-    Tracking/                      — distancia, pose, gate de calidad, estadística por ventana
-    Stimulus/                      — escalado ángulo↔mm↔puntos, tabla de tamaños de pantalla, staircase
-    Export/                        — esquemas CSV/JSON y sus enums de dominio
-  Tests/VisionMVPCoreTests/        — XCTest, corre con `swift test`
+    Tracking/                      — distancia, pose, timing real de frames, estadística por ventana
+    Stimulus/                      — niveles logMAR, escalera 2-down/1-up por niveles, geometría 5×5
+    Engine/                        — VisionTestEngine: máquina de estados completa del test
+    Export/                        — esquemas CSV/JSON (frames, ensayos, resumen de sesión)
+  Tests/VisionMVPCoreTests/        — XCTest, corre con `swift test` (incluye simulaciones §27)
   project.yml                      — especificación XcodeGen (genera el .xcodeproj)
   VisionDistanceMVP/                — target de la app (SwiftUI + ARKit + SwiftData)
-    App/                           — punto de entrada, navegación, estado de sesión en curso
-    Models/                        — Participant, SessionRecord (SwiftData), payloads de exportación
-    Persistence/                   — SwiftData stack, repositorio, archivos CSV/JSON en disco
-    Tracking/                      — FaceTrackingSession (ARKit), DistanceRunRecorder, CoreMotion
-    Stimulus/                      — LandoltCShape, panel de respuesta de 8 direcciones
-    Screens/                       — las 5 pantallas base + módulo de distancia + módulo de test visual + sesiones/exportar/privacidad
+    App/                           — punto de entrada y navegación
+    Models/                        — SessionRecord (SwiftData), chequeo de capacidades
+    Persistence/                   — SwiftData stack, archivos CSV/JSON en disco, export
+    Tracking/                      — FaceTrackingSession (ARKit), VisionTestRunner (puente al motor)
+    Stimulus/                      — LandoltCShape, panel de respuesta de 4 direcciones
+    Screens/                       — Home, Intro, Práctica, Test, Resultados anteriores, Privacidad
 ```
 
 ## Qué guarda cada sesión
@@ -86,13 +95,12 @@ ios-vision-distance-mvp/
 Por sesión, en `Documents/Sessions/<sessionID>/` dentro del propio
 dispositivo (nunca sale de ahí salvo exportación explícita):
 
-- `distance_frames.csv` — un renglón por frame de ARKit del módulo de
-  distancia (válido o descartado, con motivo).
-- `distance_summary.json` — resumen por hito/repetición.
-- `vision_trials.csv` — un renglón por ensayo del módulo de test visual.
-- `blur_crossings.csv` — los cruces claro/borroso marcados por el
-  participante.
-- `distance_frames_blur_crossing_rep<N>.csv` — trayectoria de distancia de
-  cada repetición del cruce claro/borroso.
+- `test_frames.csv` — un renglón por frame de tracking durante el test
+  (distancia óptica, pose, calidad, estado del test, fps efectivo).
+- `vision_trials.csv` — un renglón por figura presentada (nivel logMAR,
+  tamaños, respuesta, tiempo de reacción, estado de la escalera).
+- `session_summary.json` — resumen de la sesión (umbral, reversiones,
+  exactitud, distancia mediana, motivo de término, versiones).
 
-Nunca se guardan fotografías, video, ni ningún identificador personal.
+Los tres archivos comparten el mismo `session_id`. Nunca se guardan
+fotografías, video, ni ningún identificador personal.

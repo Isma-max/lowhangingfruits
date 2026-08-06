@@ -10,12 +10,17 @@ import Foundation
 /// since it already varies per run configuration.
 public enum InstrumentVersions {
     /// Vision-test trial protocol: what's measured, how a trial is gated,
-    /// what triggers a valid trial. Bump 1 -> 2 reflects this Fase 1
-    /// stabilization pass (distance-stability gating, quality gating,
-    /// continuous trajectory logging, 2-down/1-up default).
-    public static let protocolVersion = "2"
+    /// what triggers a valid trial. v3 = the single 60-second test
+    /// (VisionTestEngine): discrete logMAR levels, 2-down/1-up over levels,
+    /// grace/pause recovery, per-figure 5s timeout, explicit termination
+    /// criteria. v2 was the Fase 1 stabilization pass; v1 the original MVP.
+    public static let protocolVersion = "3"
 
     /// Optotype physical/angular geometry definition (5x5 Landolt-C grid,
     /// critical-detail = totalHeight / 5).
     public static let geometryVersion = "landoltc-5x5-v1"
+
+    /// Adaptive algorithm: 2-down/1-up over a fixed logMAR level ladder,
+    /// one level per move.
+    public static let algorithmVersion = "levels-2down1up-v1"
 }

@@ -2,73 +2,6 @@ import XCTest
 @testable import VisionMVPCore
 
 final class CSVExportTests: XCTestCase {
-    func testDistanceFrameRecordRoundTripsThroughCSVFields() {
-        let record = DistanceFrameRecord(
-            timestampISO8601: "2026-08-06T10:00:00Z",
-            elapsedMilliseconds: 1234.5,
-            milestoneCentimeters: 40,
-            repetition: 2,
-            distanceCameraToFaceMeters: 0.402,
-            distanceCameraToLeftEyeMeters: 0.405,
-            distanceCameraToRightEyeMeters: 0.399,
-            distanceMeanEyesMeters: 0.402,
-            yawDegrees: 1.2,
-            pitchDegrees: -0.5,
-            rollDegrees: 0.1,
-            faceTracked: true,
-            worldTrackingState: "normal",
-            faceCentered: true,
-            leftEyeInFrame: true,
-            rightEyeInFrame: true,
-            valid: true,
-            discardReason: nil,
-            referenceDistanceCentimeters: 40
-        )
-
-        let csv = CSVEncoder.encode([record])
-        let lines = csv.components(separatedBy: "\r\n").filter { !$0.isEmpty }
-
-        let expectedRow = [
-            "2026-08-06T10:00:00Z", "1234.5", "40.0", "2",
-            "0.402", "0.405", "0.399", "0.402",
-            "1.2", "-0.5", "0.1",
-            "true", "normal", "true", "true", "true", "true", "", "40.0",
-        ].joined(separator: ",")
-
-        XCTAssertEqual(lines.count, 2) // header + 1 row
-        XCTAssertEqual(lines[0], DistanceFrameRecord.csvHeader.joined(separator: ","))
-        XCTAssertEqual(lines[1], expectedRow) // discardReason nil -> empty field between the two "true"s
-    }
-
-    func testInvalidFrameKeepsDiscardReason() {
-        let record = DistanceFrameRecord(
-            timestampISO8601: "2026-08-06T10:00:01Z",
-            elapsedMilliseconds: 1267.0,
-            milestoneCentimeters: nil,
-            repetition: nil,
-            distanceCameraToFaceMeters: 1.5,
-            distanceCameraToLeftEyeMeters: nil,
-            distanceCameraToRightEyeMeters: nil,
-            distanceMeanEyesMeters: nil,
-            yawDegrees: 0,
-            pitchDegrees: 0,
-            rollDegrees: 0,
-            faceTracked: true,
-            worldTrackingState: "normal",
-            faceCentered: false,
-            leftEyeInFrame: true,
-            rightEyeInFrame: true,
-            valid: false,
-            discardReason: "distance_out_of_range",
-            referenceDistanceCentimeters: nil
-        )
-
-        let fields = record.csvFields()
-        XCTAssertEqual(fields[DistanceFrameRecord.csvHeader.firstIndex(of: "valid")!], "false")
-        XCTAssertEqual(fields[DistanceFrameRecord.csvHeader.firstIndex(of: "discard_reason")!], "distance_out_of_range")
-        XCTAssertEqual(fields[DistanceFrameRecord.csvHeader.firstIndex(of: "milestone_cm")!], "")
-    }
-
     func testCSVFieldEscapesCommasQuotesAndNewlines() {
         XCTAssertEqual(CSVFormatting.field("plain"), "plain")
         XCTAssertEqual(CSVFormatting.field("a,b"), "\"a,b\"")
@@ -76,72 +9,118 @@ final class CSVExportTests: XCTestCase {
         XCTAssertEqual(CSVFormatting.field("a\nb"), "\"a\nb\"")
     }
 
-    private func makeTrialRecord(
-        distanceMeters: Double = 0.35,
-        totalHeightMillimeters: Double = 4.2,
-        response: GapOrientation?,
-        correct: Bool = false
-    ) -> VisionTrialRecord {
-        let geometry = StimulusScaler.measurement(totalHeightMillimeters: totalHeightMillimeters, distanceMeters: distanceMeters)
-        return VisionTrialRecord(
-            taskPhase: .dynamicConstantAngularSize,
-            eyeCondition: .oculusDexter,
-            correctionUsed: true,
-            trialIndex: 3,
-            timestampISO8601: "2026-08-06T10:05:00Z",
-            distanceMeters: distanceMeters,
-            accommodativeDemandDiopters: AccommodativeDemand.diopters(distanceMeters: distanceMeters),
-            geometry: geometry,
-            totalHeightPoints: 30.0,
-            totalHeightPixels: 90.0,
-            gapOrientationTruth: .right,
+    // MARK: - TrialRecord (schema v3)
+
+    private func makeTrialRecord(response: GapOrientation? = .up, valid: Bool = true) -> TrialRecord {
+        TrialRecord(
+            sessionID: "S1",
+            trialID: "S1-0",
+            trialIndex: 0,
+            timestampPresentedISO8601: "2026-08-07T10:00:00Z",
+            timestampAnsweredISO8601: response == nil ? nil : "2026-08-07T10:00:01Z",
+            effectiveElapsedMs: 1200,
+            stimulusType: "landolt_c",
+            orientationTruth: .up,
             response: response,
-            correct: correct,
-            reactionTimeMilliseconds: 812,
-            isReversal: true,
-            stepSize: 1.5,
-            yawDegrees: 2.0,
-            pitchDegrees: -1.0,
-            rollDegrees: 0.5,
+            correct: response == .up,
+            timeout: false,
+            reactionTimeMs: response == nil ? nil : 950,
+            logMARLevel: 0.5,
+            stimulusHeightPoints: 22.1,
+            stimulusHeightPixels: 66.3,
+            stimulusHeightMillimeters: 3.68,
+            totalVisualAngleArcMinutes: 15.8,
+            criticalDetailArcMinutes: 3.16,
+            viewingDistanceMeters: 0.40,
+            accommodativeDemandDiopters: 2.5,
+            consecutiveCorrectBefore: 1,
+            consecutiveCorrectAfter: 0,
+            staircaseDirectionBefore: "down",
+            staircaseDirectionAfter: "down",
+            isReversal: false,
+            reversalCount: 2,
+            validTrial: valid,
+            invalidReason: valid ? nil : "interrupted_by_pause",
+            repeatedAfterPause: false,
+            terminationReason: "reversals_reached"
+        )
+    }
+
+    func testTrialRecordHeaderMatchesFieldCount() {
+        let record = makeTrialRecord()
+        XCTAssertEqual(record.csvFields().count, TrialRecord.csvHeader.count)
+    }
+
+    func testTrialRecordDefaultsToCurrentVersions() {
+        let record = makeTrialRecord()
+        XCTAssertEqual(record.protocolVersion, InstrumentVersions.protocolVersion)
+        XCTAssertEqual(record.algorithmVersion, InstrumentVersions.algorithmVersion)
+    }
+
+    func testTrialRecordNilResponseLeavesEmptyFields() {
+        let record = makeTrialRecord(response: nil)
+        let fields = record.csvFields()
+        XCTAssertEqual(fields[TrialRecord.csvHeader.firstIndex(of: "response")!], "")
+        XCTAssertEqual(fields[TrialRecord.csvHeader.firstIndex(of: "reaction_time_ms")!], "")
+        XCTAssertEqual(fields[TrialRecord.csvHeader.firstIndex(of: "timestamp_answered")!], "")
+    }
+
+    // MARK: - TestFrameRecord (schema per encargo §22)
+
+    private func makeFrameRecord() -> TestFrameRecord {
+        TestFrameRecord(
+            sessionID: "S1",
+            timestampISO8601: "2026-08-07T10:00:00Z",
+            elapsedMs: 500,
+            effectiveTestTimeMs: 200,
+            viewingDistanceMeters: 0.401,
+            distanceCameraToFaceMeters: 0.395,
+            distanceCameraToLeftEyeMeters: 0.402,
+            distanceCameraToRightEyeMeters: 0.400,
+            yawDegrees: 1.5,
+            pitchDegrees: -0.4,
+            rollDegrees: 0.2,
             faceTracked: true,
             worldTrackingState: "normal",
+            faceCentered: true,
+            leftEyeInFrame: true,
+            rightEyeInFrame: true,
+            insideDistanceRange: true,
+            measurementStable: true,
             valid: true,
             discardReason: nil,
-            staircaseAlgorithm: "2down1up"
+            actualFrameIntervalMs: 16.6,
+            effectiveFps: 59.9,
+            testState: "stimulus"
         )
     }
 
-    func testVisionTrialRecordHeaderMatchesFieldCount() {
-        let record = makeTrialRecord(response: .down)
-        XCTAssertEqual(record.csvFields().count, VisionTrialRecord.csvHeader.count)
-        XCTAssertEqual(record.csvFields()[VisionTrialRecord.csvHeader.firstIndex(of: "response")!], "down")
+    func testFrameRecordHeaderMatchesFieldCount() {
+        let record = makeFrameRecord()
+        XCTAssertEqual(record.csvFields().count, TestFrameRecord.csvHeader.count)
     }
 
-    func testVisionTrialRecordWithNilResponseLeavesEmptyField() {
-        let record = makeTrialRecord(response: nil)
-        XCTAssertEqual(record.csvFields()[VisionTrialRecord.csvHeader.firstIndex(of: "response")!], "")
+    /// Encargo §4/§26.36: the legacy characterization columns must be gone
+    /// from the normal exports.
+    func testExportsDoNotContainLegacyCharacterizationColumns() {
+        for legacy in ["milestone_cm", "repetition", "reference_distance_cm"] {
+            XCTAssertFalse(TestFrameRecord.csvHeader.contains(legacy), "\(legacy) should not be in test_frames.csv")
+            XCTAssertFalse(TrialRecord.csvHeader.contains(legacy), "\(legacy) should not be in vision_trials.csv")
+        }
     }
 
-    func testVisionTrialRecordSeparatesTotalHeightFromCriticalDetailInCSV() {
-        let record = makeTrialRecord(totalHeightMillimeters: 25, response: .up)
-        let totalHeightField = record.csvFields()[VisionTrialRecord.csvHeader.firstIndex(of: "total_height_mm")!]
-        let criticalDetailField = record.csvFields()[VisionTrialRecord.csvHeader.firstIndex(of: "critical_detail_mm")!]
-        XCTAssertEqual(totalHeightField, "25.0")
-        XCTAssertEqual(criticalDetailField, "5.0")
+    /// Encargo §26.37: every export carries the same session id column.
+    func testAllExportsCarrySessionID() {
+        XCTAssertEqual(TestFrameRecord.csvHeader.first, "session_id")
+        XCTAssertEqual(TrialRecord.csvHeader.first, "session_id")
+        XCTAssertEqual(makeFrameRecord().csvFields().first, "S1")
+        XCTAssertEqual(makeTrialRecord().csvFields().first, "S1")
     }
 
-    func testVisionTrialRecordDefaultsToCurrentVersions() {
-        let record = makeTrialRecord(response: .up)
-        XCTAssertEqual(record.protocolVersion, InstrumentVersions.protocolVersion)
-        XCTAssertEqual(record.geometryVersion, InstrumentVersions.geometryVersion)
-    }
-
-    func testBlurCrossingRecordFields() {
-        let record = BlurCrossingRecord(
-            eyeCondition: .oculusSinister, correctionUsed: true, repetition: 1,
-            crossingTimestampISO8601: "t", distanceAtCrossingMeters: 0.33, direction: .approaching
-        )
-        XCTAssertEqual(record.csvFields().count, BlurCrossingRecord.csvHeader.count)
-        XCTAssertEqual(record.csvFields()[BlurCrossingRecord.csvHeader.firstIndex(of: "direction")!], "approaching")
+    func testOutOfRangeIsNotADiscardReasonInFrameSchema() {
+        // Range/stability are separate boolean columns, not invalidity.
+        XCTAssertTrue(TestFrameRecord.csvHeader.contains("inside_distance_range"))
+        XCTAssertTrue(TestFrameRecord.csvHeader.contains("measurement_stable"))
+        XCTAssertTrue(TestFrameRecord.csvHeader.contains("valid"))
     }
 }

@@ -13,17 +13,10 @@ struct SessionDetailView: View {
     var body: some View {
         List {
             if let session {
-                Section("Participante") {
-                    Text(session.participant?.pseudonymousID ?? "—")
-                }
-                Section("Dispositivo") {
-                    LabeledContent("Modelo", value: session.deviceModelIdentifier)
+                Section("Sesión") {
+                    LabeledContent("Fecha", value: session.createdAt.formatted(date: .abbreviated, time: .shortened))
+                    LabeledContent("Dispositivo", value: session.deviceModelIdentifier)
                     LabeledContent("iOS", value: session.iosVersion)
-                    LabeledContent("TrueDepth", value: session.hasTrueDepth ? "Sí" : "No")
-                }
-                Section("Estado") {
-                    LabeledContent("Consentimiento", value: session.consentAccepted ? "Aceptado" : "No aceptado")
-                    LabeledContent("Excluida por alarma", value: session.alarmPresent ? "Sí" : "No")
                 }
             }
 

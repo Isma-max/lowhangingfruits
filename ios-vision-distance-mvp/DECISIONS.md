@@ -325,3 +325,82 @@ ARKit a 30–60Hz) y de ensayo. `ModelConfiguration(cloudKitDatabase: .none)`
 explícito para garantizar que nunca hay sincronización remota, sin depender
 de que el proyecto de Xcode no tenga casualmente capacidades de CloudKit
 activadas.
+
+---
+
+# Iteración: simplificación a un único test de 60 segundos
+
+## Causa raíz del estado permanente `too_many_dropped_frames`
+
+En `DistanceRunRecorder.ingest(_:)` (archivo ya eliminado), el ratio de
+"frames perdidos" se calculaba sobre la **validez de calidad** de los frames
+de la ventana móvil de 2s — no sobre discontinuidades reales de timestamps.
+Consecuencia: los ~0,88s de movimiento inestable marcaron >30% de la ventana
+como inválida; a partir de ahí, cada frame nuevo se evaluaba con
+`recentFrameLossRatio > 0.30` → se marcaba `too_many_dropped_frames` → ese
+mismo frame inválido entraba a la ventana → el ratio se mantenía en 100%
+para siempre. Un bucle de retroalimentación positiva sin salida, confirmado
+por la evidencia del CSV: 49,21s de "dropped frames" mientras ARKit seguía a
+~60fps con tracking normal y rostro detectado al 99,8%.
+
+Efecto en cascada: desde Fase 1, un ensayo cuyo frame estaba inválido no
+alimentaba la escalera. Con todos los frames inválidos, la escalera nunca
+avanzó (la figura no cambiaba de tamaño) y nunca convergió (el test no
+terminaba). Los tres síntomas reportados tienen esta única causa.
+
+## Corrección
+
+- Los dropped frames reales se detectan ahora **solo** por timestamps:
+  `FrameTimingTracker` (gap > 100ms = drop real; fps efectivo sobre ventana
+  móvil de 2s). Un frame que llegó pero midió fuera de rango o inestable
+  jamás cuenta como "perdido" — se exporta con `inside_distance_range` /
+  `measurement_stable` como columnas booleanas separadas de `valid`.
+- La lógica del test vive en `VisionTestEngine` (VisionMVPCore/Engine/), una
+  máquina de estados pura y determinista: positioning → countdown → stimulus
+  ⇄ paused → finished. Sin estado acumulativo desde el inicio de sesión: la
+  calidad se evalúa frame a frame y con ventanas móviles, y salir del rango
+  entra a `paused` con recuperación automática (500ms estables) conservando
+  nivel, aciertos y reversiones. Nunca hay estado atrapado: toda ruta tiene
+  salida por uno de los seis criterios de término.
+
+## Definición única de distancia óptica
+
+`viewing_distance_m` = distancia euclidiana desde el origen de
+`ARFrame.camera.transform` (la cámara TrueDepth, que es el origen de medición
+de ARKit) hasta el punto medio de ambos ojos
+(`faceAnchor.transform * leftEyeTransform` / `rightEyeTransform`, promedio
+de las dos distancias) = `LiveSample.distanceMeanEyesMeters`. Esta única
+definición controla el rango 37–43cm, calcula el tamaño angular del estímulo
+y llena la columna `viewing_distance_m` de todas las exportaciones.
+`distance_camera_to_face_m` se mantiene como columna auxiliar de comparación.
+No se aplica corrección cámara→plano de pantalla en esta versión (la cámara
+está unos milímetros sobre el borde del display; limitación documentada).
+
+## Por qué la figura parecía no cambiar de tamaño
+
+Dos causas: (1) el bucle de frames inválidos congeló la escalera (arriba); y
+(2) la escalera anterior operaba en milímetros continuos con paso que se
+reducía a la mitad en cada reverso — cerca del umbral los cambios eran de
+décimas de mm, imperceptibles por diseño. Ahora los niveles son una lista
+fija logarítmica (0.8 → −0.2 logMAR, paso 0.1 = factor ×1,259 en tamaño),
+cada movimiento es exactamente un nivel, y el tamaño en puntos se recalcula
+y aplica en cada presentación (verificado por test: tamaños estrictamente
+decrecientes entre niveles consecutivos).
+
+## Reloj y criterios de término
+
+- Reloj efectivo: corre solo mientras hay estímulo visible (incluye el
+  periodo de gracia de 1s); se pausa en `paused` y ante gaps reales de
+  frames (>0,3s), que se cargan al presupuesto de pausa.
+- Término (lo que ocurra primero): 6 reversiones · 20 ensayos válidos ·
+  60s efectivos · >15s de pausa acumulada · 75s reales (red de seguridad) ·
+  abandono. Mínimo 10 ensayos válidos para un resultado; menos → no
+  concluyente. 6 reversiones con SD ≤0,15 logMAR → completada; si no →
+  aproximada.
+- Timeout por figura: 5s de tiempo visible (la pausa no consume); cuenta
+  como error para la escalera y pasa a la siguiente figura.
+
+## Versiones
+
+`protocol_version = "3"`, `algorithm_version = "levels-2down1up-v1"`,
+geometría sin cambios (`landoltc-5x5-v1`). Exportadas en cada fila.

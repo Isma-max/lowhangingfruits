@@ -28,7 +28,7 @@ struct ExportView: View {
                         } label: {
                             HStack {
                                 Image(systemName: selectedSessionIDs.contains(session.id) ? "checkmark.circle.fill" : "circle")
-                                Text(session.participant?.pseudonymousID ?? session.id.uuidString.prefix(8).description)
+                                Text(session.id.uuidString.prefix(8).description)
                                 Spacer()
                                 Text(session.createdAt.formatted(date: .abbreviated, time: .omitted))
                                     .font(.caption)
