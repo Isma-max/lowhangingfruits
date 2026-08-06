@@ -57,6 +57,11 @@ struct DynamicTrialView: View {
                 StimulusView(gapOrientation: currentTruth, sizePoints: ScreenGeometryHelper.pointsForMillimeters(currentSizeMm))
                     .frame(height: 160)
 
+                Text("¿Hacia dónde apunta la abertura del anillo? Toca la flecha correspondiente.")
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+
                 GapDirectionResponsePad { response in
                     respond(response)
                 }
