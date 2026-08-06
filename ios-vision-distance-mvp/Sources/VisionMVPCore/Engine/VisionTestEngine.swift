@@ -101,6 +101,9 @@ public struct TestResult: Sendable {
     public var thresholdLogMAR: Double?
     public var confidence: String
     public var reversalCount: Int
+    /// SD (logMAR) of the reversals used for the threshold — the
+    /// "variabilidad entre reversiones" surfaced in the experimental result.
+    public var reversalSpreadLogMAR: Double?
     public var validTrialCount: Int
     public var effectiveSeconds: Double
     public var pausedSeconds: Double
@@ -186,6 +189,11 @@ public final class VisionTestEngine {
     }
 
     public var isFinished: Bool { result != nil }
+
+    /// True once the first stimulus was presented — the boundary between
+    /// "backing out of positioning" (nothing to save) and "abandoning a
+    /// started test" (session must be persisted).
+    public var hasStarted: Bool { realStartTimestamp != nil }
 
     /// Debug panel: why hasn't the test ended yet (encargo §25).
     public var notFinishedBecause: String {
@@ -526,6 +534,7 @@ public final class VisionTestEngine {
             thresholdLogMAR: threshold,
             confidence: confidence,
             reversalCount: staircase.reversalCount,
+            reversalSpreadLogMAR: spread,
             validTrialCount: validTrialCount,
             effectiveSeconds: effectiveSeconds,
             pausedSeconds: pausedSeconds,

@@ -2,26 +2,29 @@ import SwiftUI
 import VisionMVPCore
 
 /// The single 60-second vision test: positioning -> 3-2-1 countdown ->
-/// timed stimulus loop with pause/recovery -> result. All logic lives in
-/// `VisionTestEngine` (via `VisionTestRunner`); this view only renders state
-/// and forwards taps.
+/// timed stimulus loop with pause/recovery -> saved result. All logic lives
+/// in `VisionTestEngine` (via `VisionTestRunner`); the session is persisted
+/// synchronously by the runner the moment the engine finishes — before the
+/// result UI appears, and never from `onDisappear` (encargo §2).
 struct VisionTestView: View {
     @Binding var path: [AppRoute]
+    var participantID: String
     @EnvironmentObject private var faceTrackingSession: FaceTrackingSession
-    @EnvironmentObject private var sessionRepository: SessionRepository
     @StateObject private var runner = VisionTestRunner()
 
     var body: some View {
         content
-            .padding(20)
             .navigationBarTitleDisplayMode(.inline)
-            .navigationBarBackButtonHidden(runner.uiState.phaseName == "stimulus")
+            .navigationBarBackButtonHidden(runner.uiState.phaseName == "stimulus" || runner.saveState == .saving)
             .onAppear {
-                runner.attach(repository: sessionRepository)
+                runner.participantID = participantID
                 faceTrackingSession.start()
             }
             .onDisappear {
                 faceTrackingSession.stop()
+                // Safety net only: a started-but-unfinished test is closed as
+                // abandoned and persisted synchronously inside abandon() —
+                // the normal path saved long before this runs.
                 if !runner.uiState.isFinished {
                     runner.abandon()
                 }
@@ -31,20 +34,83 @@ struct VisionTestView: View {
             }
     }
 
+    /// The result screen brings its own scrolling and padding; the in-test
+    /// phases are fixed-layout and get theirs here.
     @ViewBuilder
     private var content: some View {
-        if runner.uiState.isFinished, let result = runner.finalResult {
-            resultView(result)
+        if runner.uiState.isFinished {
+            finishedContent
         } else {
-            switch runner.uiState.phaseName {
-            case "positioning":
-                positioningView
-            case "countdown":
-                countdownView
-            case "paused":
-                pausedView
-            default:
-                stimulusView
+            Group {
+                switch runner.uiState.phaseName {
+                case "positioning":
+                    positioningView
+                case "countdown":
+                    countdownView
+                case "paused":
+                    pausedView
+                default:
+                    stimulusView
+                }
+            }
+            .padding(20)
+        }
+    }
+
+    // MARK: Finished: saving -> saved result / save error (encargo §2/§8)
+
+    @ViewBuilder
+    private var finishedContent: some View {
+        switch runner.saveState {
+        case .saving:
+            VStack(spacing: 16) {
+                Spacer()
+                ProgressView()
+                Text("Guardando resultado…")
+                    .font(.headline)
+                Spacer()
+            }
+            .padding(20)
+        case .failed(let message):
+            VStack(spacing: 16) {
+                Spacer()
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.orange)
+                Text("No pudimos guardar el resultado")
+                    .font(.title3.bold())
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Button {
+                    runner.retrySave()
+                } label: {
+                    Text("Reintentar")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                Button("Volver al inicio") { path.removeAll() }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(20)
+        case .saved, .idle:
+            if let summary = runner.summary {
+                TestResultScreen(
+                    summary: summary,
+                    saveConfirmed: runner.saveState == .saved,
+                    onRepeat: { runner.restart() },
+                    onHome: { path.removeAll() }
+                )
+            } else {
+                // Finished without a started test (backed out of positioning):
+                // nothing to show or save.
+                Color.clear.onAppear { path.removeAll() }
             }
         }
     }
@@ -119,7 +185,7 @@ struct VisionTestView: View {
                     ProgressView(value: runner.uiState.progress)
                 }
                 Spacer()
-                Button("Salir") { abandonAndShowResult() }
+                Button("Salir") { abandonOrLeave() }
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -135,7 +201,7 @@ struct VisionTestView: View {
             if let orientation = runner.uiState.stimulusOrientation {
                 StimulusView(gapOrientation: orientation, sizePoints: runner.uiState.stimulusSizePoints)
                     .frame(height: max(140, runner.uiState.stimulusSizePoints))
-                    .animation(nil, value: orientation) // instant swap, no long animation (§14)
+                    .animation(nil, value: orientation)
             }
 
             Spacer()
@@ -185,108 +251,22 @@ struct VisionTestView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Spacer()
-            Button("Salir") { abandonAndShowResult() }
+            Button("Salir") { abandonOrLeave() }
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             debugPanel
         }
     }
 
-    // MARK: Result (encargo §21)
-
-    private func resultView(_ result: TestResult) -> some View {
-        VStack(spacing: 20) {
-            Spacer()
-            Image(systemName: resultSymbol(result.outcome))
-                .font(.system(size: 56))
-                .foregroundStyle(resultColor(result.outcome))
-
-            Text(resultTitle(result.outcome))
-                .font(.title2.bold())
-                .multilineTextAlignment(.center)
-
-            Text(resultMessage(result))
-                .font(.body)
-                .multilineTextAlignment(.center)
-
-            if result.outcome == .completed {
-                Text("Completaste el test en \(Int(result.effectiveSeconds.rounded())) segundos.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text("Este test entrega una estimación orientativa y no reemplaza un examen profesional.")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.top, 8)
-
-            Spacer()
-
-            if result.outcome == .inconclusive {
-                Button {
-                    runner.restart()
-                } label: {
-                    Text("Repetir test")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-            }
-
-            Button {
-                path.removeAll()
-            } label: {
-                Text("Volver al inicio")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
+    private func abandonOrLeave() {
+        if runner.hasStarted {
+            runner.abandon() // persists the abandoned session, then shows result
+        } else {
+            path.removeAll()
         }
     }
 
-    private func resultSymbol(_ outcome: TestOutcome) -> String {
-        switch outcome {
-        case .completed: return "checkmark.seal.fill"
-        case .approximate: return "checkmark.seal"
-        case .inconclusive: return "questionmark.circle"
-        }
-    }
-
-    private func resultColor(_ outcome: TestOutcome) -> Color {
-        switch outcome {
-        case .completed: return .green
-        case .approximate: return .orange
-        case .inconclusive: return .secondary
-        }
-    }
-
-    private func resultTitle(_ outcome: TestOutcome) -> String {
-        switch outcome {
-        case .completed: return "Medición completada"
-        case .approximate: return "Medición aproximada"
-        case .inconclusive: return "Resultado no concluyente"
-        }
-    }
-
-    private func resultMessage(_ result: TestResult) -> String {
-        switch result.outcome {
-        case .completed:
-            return "Pudimos obtener una medición consistente de tu visión cercana."
-        case .approximate:
-            return "Completaste el test, pero el resultado presenta cierta variabilidad y debe interpretarse con cautela."
-        case .inconclusive:
-            return "No pudimos obtener una medición suficientemente consistente. Puedes repetir el test procurando mantener la posición."
-        }
-    }
-
-    private func abandonAndShowResult() {
-        runner.abandon()
-    }
-
-    // MARK: Debug panel (encargo §25 — DEBUG builds only)
+    // MARK: Debug panel (DEBUG builds only)
 
     @ViewBuilder
     private var debugPanel: some View {

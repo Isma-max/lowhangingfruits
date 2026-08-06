@@ -404,3 +404,76 @@ decrecientes entre niveles consecutivos).
 
 `protocol_version = "3"`, `algorithm_version = "levels-2down1up-v1"`,
 geometría sin cambios (`landoltc-5x5-v1`). Exportadas en cada fila.
+
+---
+
+# Iteración: persistencia y exportación
+
+## Causa exacta de que no quedara registro
+
+Tres defectos encadenados en `VisionTestRunner.finishAndExport()` (versión
+anterior):
+
+1. **`catch` vacío.** Las tres escrituras estaban dentro de un `do/catch` cuyo
+   cuerpo era sólo un comentario. Cualquier fallo de escritura se descartaba
+   en silencio y la UI seguía mostrando "Medición aproximada" como si todo
+   hubiera salido bien.
+2. **Sin verificación posterior.** No se comprobaba que los archivos
+   existieran ni que tuvieran contenido. Un archivo de cero bytes contaba
+   como éxito.
+3. **Historial dependiente de SwiftData, no de los archivos.** El listado
+   "Resultados anteriores" leía `SessionRecord` de SwiftData, mientras que los
+   CSV/JSON iban a `Documents/Sessions/`. Dos fuentes de verdad distintas: si
+   la inserción en SwiftData fallaba (o el `ModelContainer` no estaba
+   disponible), la sesión desaparecía del historial aunque sus archivos
+   existieran en disco — y viceversa.
+
+Además, la única ruta de exportación era `ExportView`, alcanzable sólo desde
+un botón de la barra de "Resultados anteriores"; la pantalla de resultado no
+ofrecía ninguna forma de compartir.
+
+## Corrección
+
+- **`SessionStore`** (VisionMVPCore/Export/): única fuente de verdad, en
+  `Application Support/Sessions/{session_id}/`. Escritura atómica (temporal →
+  validar → reemplazar), verificación de existencia y tamaño > 0 de cada
+  archivo, relectura y decodificación del resumen para descartar corrupción,
+  y `session_complete.json` escrito **al final** como marca de guardado
+  íntegro (`listSummaries()` sólo devuelve sesiones con manifiesto). Los
+  errores **se lanzan**, nunca se silencian.
+- **Guardado síncrono antes de navegar** (`VisionTestRunner.persistNow()`):
+  se invoca en el mismo turno en que el motor termina — desde `ingest`,
+  `respond` o `abandon` — no desde `onDisappear` ni desde una tarea async
+  cancelable. La pantalla de resultado sólo aparece con `saveState == .saved`;
+  si falla muestra "No pudimos guardar el resultado" con reintento, y el
+  resumen permanece en memoria mientras tanto.
+- **SwiftData eliminado por completo.** El historial lee los mismos archivos
+  que se exportan, así que UI y datos no pueden divergir.
+- **Validación cruzada antes de escribir**: todos los ensayos y frames deben
+  compartir el `session_id` del resumen, los conteos del resumen deben cuadrar
+  con el número de ensayos, y no se guarda una sesión sin ensayos.
+
+## Exportación
+
+`exportZip(forSessionID:)` valida las entradas (encabezado esperado, ≥1
+ensayo, `session_id` consistente), comprime la carpeta con
+`NSFileCoordinator(.forUploading)` — sin dependencias externas — y verifica
+la salida (existe, no vacía, magic bytes `PK`). El ZIP queda en
+`Application Support/Exports/` con nombre
+`vision_test_<fecha>_<id_corto>.zip` y **no se borra** tras compartir. Si el
+ZIP falla por cualquier motivo, la pantalla comparte los cuatro archivos
+sueltos y lo avisa: la exportación nunca queda bloqueada por el ZIP.
+
+## Resultado comprensible
+
+`ExplanationCodeEngine` produce códigos deterministas a partir del resultado
+del motor (reversiones, dispersión entre reversiones, % de frames en rango,
+timeouts, tiempo de reacción mediano, motivo de término). La UI mapea cada
+código a una frase fija: nunca inventa la causa. `SummaryBuilder` genera el
+`SessionSummary` que alimenta **a la vez** la tarjeta en pantalla y el
+`session_summary.json`, así que ambos no pueden discrepar.
+
+`session_summary.json` es schema v2 con claves snake_case; los valores
+faltantes se codifican como `null` explícito (implementando `encode(to:)` a
+mano, porque la síntesis por defecto de `Codable` omite las claves de los
+opcionales `nil` en vez de escribir `null`).

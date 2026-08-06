@@ -10,16 +10,14 @@ struct RootView: View {
                     switch route {
                     case .testIntro:
                         TestIntroView(path: $path)
-                    case .practice:
-                        PracticeView(path: $path)
-                    case .visionTest:
-                        VisionTestView(path: $path)
+                    case .practice(let participantID):
+                        PracticeView(path: $path, participantID: participantID)
+                    case .visionTest(let participantID):
+                        VisionTestView(path: $path, participantID: participantID)
                     case .savedSessions:
                         SavedSessionsView(path: $path)
-                    case .sessionDetail(let id):
-                        SessionDetailView(sessionID: id)
-                    case .export:
-                        ExportView()
+                    case .storedResult(let sessionID):
+                        StoredResultView(path: $path, sessionID: sessionID)
                     case .privacy:
                         PrivacyInfoView()
                     }

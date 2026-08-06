@@ -4,10 +4,8 @@ import AVFoundation
 import UIKit
 import VisionMVPCore
 
-/// Result of the runtime compatibility check (brief Pantalla 2). Built once
-/// by `CompatibilityChecker` and then copied into a `SessionRecord` — kept as
-/// a plain struct (not persisted directly) so the detection logic has a
-/// single, easily-testable-by-inspection entry point.
+/// Runtime device check. The model identifier and iOS version also feed
+/// `session_summary.json`; the rest gates whether the test can run at all.
 struct DeviceCapabilities: Codable, Equatable {
     var deviceModelIdentifier: String
     var iosVersion: String
@@ -16,11 +14,10 @@ struct DeviceCapabilities: Codable, Equatable {
     var cameraAuthorizationStatusRaw: String
     var isPortraitOrientation: Bool
 
-    /// Everything the distance module actually needs is present: face
-    /// tracking hardware/API support and camera access granted. Screen
-    /// geometry and orientation are surfaced separately since they affect
-    /// specific features (stimulus sizing, UI layout) without blocking the
-    /// core distance measurement.
+    /// Everything the test actually needs is present: face tracking
+    /// hardware/API support and camera access granted. Screen geometry and
+    /// orientation are surfaced separately since they affect specific
+    /// features (stimulus sizing, UI layout) without blocking measurement.
     var isCompatible: Bool {
         hasARFaceTrackingConfiguration && cameraAuthorizationStatusRaw == "authorized"
     }

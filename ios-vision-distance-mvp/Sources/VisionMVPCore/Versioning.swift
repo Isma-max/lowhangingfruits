@@ -23,4 +23,10 @@ public enum InstrumentVersions {
     /// Adaptive algorithm: 2-down/1-up over a fixed logMAR level ladder,
     /// one level per move.
     public static let algorithmVersion = "levels-2down1up-v1"
+
+    /// Export file-format version: shared by session_summary.json and both
+    /// CSVs (every file self-describes its schema, encargo §15). v2 = the
+    /// SessionStore iteration (participant id, explanation codes, forced
+    /// nulls for missing values, schema_version column in the CSVs).
+    public static let exportSchemaVersion = "2"
 }

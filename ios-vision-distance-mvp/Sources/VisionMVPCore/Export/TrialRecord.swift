@@ -40,6 +40,7 @@ public struct TrialRecord: Sendable {
     public var terminationReason: String
     public var algorithmVersion: String
     public var protocolVersion: String
+    public var schemaVersion: String
 
     public init(
         sessionID: String,
@@ -73,7 +74,8 @@ public struct TrialRecord: Sendable {
         repeatedAfterPause: Bool,
         terminationReason: String,
         algorithmVersion: String = InstrumentVersions.algorithmVersion,
-        protocolVersion: String = InstrumentVersions.protocolVersion
+        protocolVersion: String = InstrumentVersions.protocolVersion,
+        schemaVersion: String = InstrumentVersions.exportSchemaVersion
     ) {
         self.sessionID = sessionID
         self.trialID = trialID
@@ -107,6 +109,7 @@ public struct TrialRecord: Sendable {
         self.terminationReason = terminationReason
         self.algorithmVersion = algorithmVersion
         self.protocolVersion = protocolVersion
+        self.schemaVersion = schemaVersion
     }
 }
 
@@ -122,7 +125,7 @@ extension TrialRecord: CSVRepresentable {
         "staircase_direction_before", "staircase_direction_after",
         "is_reversal", "reversal_count",
         "valid_trial", "invalid_reason", "repeated_after_pause",
-        "termination_reason", "algorithm_version", "protocol_version",
+        "termination_reason", "algorithm_version", "protocol_version", "schema_version",
     ]
 
     public func csvFields() -> [String] {
@@ -159,6 +162,7 @@ extension TrialRecord: CSVRepresentable {
             CSVFormatting.field(terminationReason),
             CSVFormatting.field(algorithmVersion),
             CSVFormatting.field(protocolVersion),
+            CSVFormatting.field(schemaVersion),
         ]
     }
 }

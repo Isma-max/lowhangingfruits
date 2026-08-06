@@ -8,6 +8,7 @@ struct TestIntroView: View {
     @Binding var path: [AppRoute]
 
     @State private var cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
+    @State private var participantID = ""
 
     private var deviceSupported: Bool { FaceTrackingSession.isSupported }
 
@@ -33,6 +34,16 @@ struct TestIntroView: View {
                     instruction(4, "Mira hacia dónde apunta la abertura.")
                     instruction(5, "Toca la dirección correspondiente.")
                     instruction(6, "Algunas figuras serán cada vez más pequeñas.")
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Identificador de participante (opcional)", text: $participantID)
+                        .textFieldStyle(.roundedBorder)
+                        .autocapitalization(.allCharacters)
+                        .disableAutocorrection(true)
+                    Text("Por ejemplo ISMA-001. Sin nombre, RUT, correo ni teléfono. Si queda vacío se genera uno automático.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if !deviceSupported {
@@ -62,7 +73,7 @@ struct TestIntroView: View {
                     .frame(maxWidth: .infinity)
                 } else {
                     Button {
-                        path.append(.practice)
+                        path.append(.practice(participantID: participantID))
                     } label: {
                         Text("Practicar primero")
                             .font(.headline)

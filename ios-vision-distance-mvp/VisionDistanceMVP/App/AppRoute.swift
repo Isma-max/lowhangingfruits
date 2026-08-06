@@ -2,10 +2,9 @@ import Foundation
 
 enum AppRoute: Hashable {
     case testIntro
-    case practice
-    case visionTest
+    case practice(participantID: String)
+    case visionTest(participantID: String)
     case savedSessions
-    case sessionDetail(UUID)
-    case export
+    case storedResult(sessionID: String)
     case privacy
 }

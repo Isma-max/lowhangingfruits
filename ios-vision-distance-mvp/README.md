@@ -1,29 +1,22 @@
 # Vision Distance MVP (prototipo de investigación)
 
-MVP experimental nativo de iOS para evaluar si un iPhone con cámara
-TrueDepth puede medir, de forma orientativa y repetible, la distancia entre
-los ojos de una persona y la pantalla, y si esa medición dinámica aporta
-información útil sobre visión cercana más allá de variables simples como
-edad y agudeza a distancia fija.
+MVP experimental nativo de iOS: un test de visión cercana de un minuto que
+usa la cámara TrueDepth para mantener y registrar la distancia ojo-pantalla
+mientras mide el tamaño angular mínimo que la persona puede identificar.
 
 **Esto no es una app de diagnóstico.** No diagnostica presbicia, no genera
 recetas y no reemplaza una evaluación oftalmológica u optométrica. Ver
-`DECISIONS.md` para el detalle exacto de cada fórmula y decisión técnica, y
-el encargo original para el diseño completo del experimento.
+`DECISIONS.md` para el detalle exacto de cada fórmula y decisión técnica.
 
 ## ⚠️ Estado de este código
 
 Este código fue escrito en un entorno sin Xcode, sin simulador de iOS y sin
-toolchain de Swift — **nunca se ha compilado**. `VisionMVPCore` (toda la
-matemática: distancia, calidad, estadística, escalado, staircase, CSV/JSON)
-tiene tests completos que puedes correr con `swift test` sin abrir Xcode
-para verificarla primero. El target de la app (SwiftUI/ARKit/SwiftData) sí
+toolchain de Swift — **nunca se ha compilado aquí**. `VisionMVPCore` (toda
+la lógica pura: motor del test, escalera, geometría, persistencia y
+exportación) tiene tests completos que puedes correr con `swift test` sin
+abrir Xcode para verificarla primero. El target de la app (SwiftUI + ARKit)
 necesita Xcode para compilar y, sobre todo, un iPhone físico con TrueDepth
 para probarse — ARKit face tracking no funciona en el simulador.
-
-Antes de usar esto en el experimento real: ábrelo en Xcode, corrígelo hasta
-que compile, y valida el módulo de distancia contra una cinta métrica o
-medidor láser en los hitos de 20 a 80cm.
 
 ## Requisitos
 
@@ -41,8 +34,9 @@ swift test
 
 Esto compila y corre todos los tests de `VisionMVPCore`: matemática de
 distancia/pose, gate de calidad, estadística por ventana, escalado de
-estímulo, staircase, y codificación CSV/JSON. Ninguno de estos tests
-requiere ARKit, SwiftUI ni un dispositivo.
+estímulo, escalera, motor del test, simulaciones, persistencia y
+exportación. Ninguno de estos tests requiere ARKit, SwiftUI ni un
+dispositivo.
 
 ## Generar y abrir el proyecto de Xcode
 
@@ -81,10 +75,10 @@ ios-vision-distance-mvp/
     Export/                        — esquemas CSV/JSON (frames, ensayos, resumen de sesión)
   Tests/VisionMVPCoreTests/        — XCTest, corre con `swift test` (incluye simulaciones §27)
   project.yml                      — especificación XcodeGen (genera el .xcodeproj)
-  VisionDistanceMVP/                — target de la app (SwiftUI + ARKit + SwiftData)
+  VisionDistanceMVP/                — target de la app (SwiftUI + ARKit)
     App/                           — punto de entrada y navegación
-    Models/                        — SessionRecord (SwiftData), chequeo de capacidades
-    Persistence/                   — SwiftData stack, archivos CSV/JSON en disco, export
+    Models/                        — chequeo de capacidades del dispositivo
+    Persistence/                   — instancia compartida del SessionStore
     Tracking/                      — FaceTrackingSession (ARKit), VisionTestRunner (puente al motor)
     Stimulus/                      — LandoltCShape, panel de respuesta de 4 direcciones
     Screens/                       — Home, Intro, Práctica, Test, Resultados anteriores, Privacidad
@@ -92,15 +86,23 @@ ios-vision-distance-mvp/
 
 ## Qué guarda cada sesión
 
-Por sesión, en `Documents/Sessions/<sessionID>/` dentro del propio
-dispositivo (nunca sale de ahí salvo exportación explícita):
+Cada test terminado se guarda automáticamente, antes de mostrar el
+resultado, en `Application Support/Sessions/<session_id>/` dentro del propio
+dispositivo (nunca sale de ahí salvo que el usuario comparta):
 
-- `test_frames.csv` — un renglón por frame de tracking durante el test
-  (distancia óptica, pose, calidad, estado del test, fps efectivo).
+- `session_summary.json` — resumen de la sesión: estado, calidad, códigos de
+  explicación, umbral estimado, conteos y estadísticas. Los valores
+  faltantes aparecen como `null`, nunca como cero.
 - `vision_trials.csv` — un renglón por figura presentada (nivel logMAR,
   tamaños, respuesta, tiempo de reacción, estado de la escalera).
-- `session_summary.json` — resumen de la sesión (umbral, reversiones,
-  exactitud, distancia mediana, motivo de término, versiones).
+- `distance_frames.csv` — un renglón por frame de tracking durante el test
+  (distancia óptica, pose, calidad, estado del test, fps efectivo).
+- `README.txt` — qué es cada archivo, unidades y aviso experimental.
+- `session_complete.json` — manifiesto interno; su presencia marca que el
+  guardado terminó íntegro.
 
-Los tres archivos comparten el mismo `session_id`. Nunca se guardan
-fotografías, video, ni ningún identificador personal.
+Los archivos comparten el mismo `session_id`. "Compartir resultados" genera
+un ZIP en `Application Support/Exports/` y lo entrega a la hoja de compartir
+de iOS. Nunca se guardan fotografías, video, ni identificadores personales
+(el identificador de participante es opcional y libre; si queda vacío se
+genera uno automático).

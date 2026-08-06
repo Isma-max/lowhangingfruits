@@ -6,6 +6,7 @@ import VisionMVPCore
 /// never recorded anywhere — no engine, no staircase, no clock, no export.
 struct PracticeView: View {
     @Binding var path: [AppRoute]
+    var participantID: String
 
     @State private var sequence: [GapOrientation] = GapOrientation.cardinalDirections.shuffled()
     @State private var index = 0
@@ -32,7 +33,7 @@ struct PracticeView: View {
                 }
                 Spacer()
                 Button {
-                    path.append(.visionTest)
+                    path.append(.visionTest(participantID: participantID))
                 } label: {
                     Text("Comenzar test")
                         .font(.headline)

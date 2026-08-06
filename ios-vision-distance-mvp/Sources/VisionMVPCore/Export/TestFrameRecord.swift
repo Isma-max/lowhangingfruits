@@ -35,6 +35,7 @@ public struct TestFrameRecord: Sendable {
     public var actualFrameIntervalMs: Double?
     public var effectiveFps: Double?
     public var testState: String
+    public var schemaVersion: String
 
     public init(
         sessionID: String,
@@ -59,7 +60,8 @@ public struct TestFrameRecord: Sendable {
         discardReason: String?,
         actualFrameIntervalMs: Double?,
         effectiveFps: Double?,
-        testState: String
+        testState: String,
+        schemaVersion: String = InstrumentVersions.exportSchemaVersion
     ) {
         self.sessionID = sessionID
         self.timestampISO8601 = timestampISO8601
@@ -84,6 +86,7 @@ public struct TestFrameRecord: Sendable {
         self.actualFrameIntervalMs = actualFrameIntervalMs
         self.effectiveFps = effectiveFps
         self.testState = testState
+        self.schemaVersion = schemaVersion
     }
 }
 
@@ -97,7 +100,7 @@ extension TestFrameRecord: CSVRepresentable {
         "left_eye_in_frame", "right_eye_in_frame",
         "inside_distance_range", "measurement_stable",
         "valid", "discard_reason",
-        "actual_frame_interval_ms", "effective_fps", "test_state",
+        "actual_frame_interval_ms", "effective_fps", "test_state", "schema_version",
     ]
 
     public func csvFields() -> [String] {
@@ -125,74 +128,8 @@ extension TestFrameRecord: CSVRepresentable {
             CSVFormatting.optionalField(actualFrameIntervalMs),
             CSVFormatting.optionalField(effectiveFps),
             CSVFormatting.field(testState),
+            CSVFormatting.field(schemaVersion),
         ]
-    }
-}
-
-/// Session-level summary — `session_summary.json` (encargo §24).
-public struct SessionSummary: Codable, Sendable {
-    public var sessionID: String
-    public var startedAt: Date
-    public var endedAt: Date
-    public var effectiveDurationSeconds: Double
-    public var realDurationSeconds: Double
-    public var validTrials: Int
-    public var invalidTrials: Int
-    public var corrects: Int
-    public var errors: Int
-    public var timeouts: Int
-    public var accuracy: Double?
-    public var medianReactionTimeMs: Double?
-    public var medianViewingDistanceMeters: Double?
-    public var viewingDistanceStandardDeviationMeters: Double?
-    public var percentFramesInsideRange: Double?
-    public var validFrames: Int
-    public var discardedFrames: Int
-    public var reversals: Int
-    public var thresholdLogMAR: Double?
-    public var confidence: String
-    public var terminationReason: String
-    public var outcome: String
-    public var protocolVersion: String
-    public var algorithmVersion: String
-
-    public init(
-        sessionID: String, startedAt: Date, endedAt: Date,
-        effectiveDurationSeconds: Double, realDurationSeconds: Double,
-        validTrials: Int, invalidTrials: Int,
-        corrects: Int, errors: Int, timeouts: Int,
-        accuracy: Double?, medianReactionTimeMs: Double?,
-        medianViewingDistanceMeters: Double?, viewingDistanceStandardDeviationMeters: Double?,
-        percentFramesInsideRange: Double?, validFrames: Int, discardedFrames: Int,
-        reversals: Int, thresholdLogMAR: Double?, confidence: String,
-        terminationReason: String, outcome: String,
-        protocolVersion: String = InstrumentVersions.protocolVersion,
-        algorithmVersion: String = InstrumentVersions.algorithmVersion
-    ) {
-        self.sessionID = sessionID
-        self.startedAt = startedAt
-        self.endedAt = endedAt
-        self.effectiveDurationSeconds = effectiveDurationSeconds
-        self.realDurationSeconds = realDurationSeconds
-        self.validTrials = validTrials
-        self.invalidTrials = invalidTrials
-        self.corrects = corrects
-        self.errors = errors
-        self.timeouts = timeouts
-        self.accuracy = accuracy
-        self.medianReactionTimeMs = medianReactionTimeMs
-        self.medianViewingDistanceMeters = medianViewingDistanceMeters
-        self.viewingDistanceStandardDeviationMeters = viewingDistanceStandardDeviationMeters
-        self.percentFramesInsideRange = percentFramesInsideRange
-        self.validFrames = validFrames
-        self.discardedFrames = discardedFrames
-        self.reversals = reversals
-        self.thresholdLogMAR = thresholdLogMAR
-        self.confidence = confidence
-        self.terminationReason = terminationReason
-        self.outcome = outcome
-        self.protocolVersion = protocolVersion
-        self.algorithmVersion = algorithmVersion
     }
 }
 
