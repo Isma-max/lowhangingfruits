@@ -24,6 +24,7 @@ struct VisionTestSetupView: View {
     @State private var fixedPhysicalSizeMillimeters: Double = 5
     @State private var dynamicTrialCount = 20
     @State private var exportMessage: String?
+    @State private var showAdvancedSettings = false
 
     var body: some View {
         Group {
@@ -76,29 +77,45 @@ struct VisionTestSetupView: View {
                 }
                 .pickerStyle(.menu)
 
-                Picker("Condición ocular", selection: $eyeCondition) {
-                    Text("Binocular").tag(EyeCondition.oculusUterque)
-                    Text("Ojo derecho").tag(EyeCondition.oculusDexter)
-                    Text("Ojo izquierdo").tag(EyeCondition.oculusSinister)
+                Group {
+                    switch taskPhase {
+                    case .staticBaseline:
+                        Text("El participante sostiene el teléfono a una distancia estable mientras la app reduce el tamaño del optotipo con cada acierto.")
+                    case .dynamicConstantAngularSize:
+                        Text("El participante acerca y aleja el teléfono; el optotipo cambia de tamaño para mantener su tamaño angular aproximadamente constante.")
+                    case .dynamicFixedPhysicalSize:
+                        Text("El participante acerca y aleja el teléfono; el optotipo mantiene siempre el mismo tamaño físico (control, sin reescalado).")
+                    case .blurCrossing:
+                        Text("El participante acerca y aleja el teléfono, marcando el momento en que el estímulo cambia entre claro y borroso. Se registran 3 repeticiones.")
+                    }
                 }
-                .pickerStyle(.segmented)
+                .font(.footnote).foregroundStyle(.secondary)
 
-                Toggle("Usa corrección óptica en esta prueba", isOn: $correctionUsed)
+                DisclosureGroup("Ajustes (opcional)", isExpanded: $showAdvancedSettings) {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Picker("Condición ocular", selection: $eyeCondition) {
+                            Text("Binocular").tag(EyeCondition.oculusUterque)
+                            Text("Ojo derecho").tag(EyeCondition.oculusDexter)
+                            Text("Ojo izquierdo").tag(EyeCondition.oculusSinister)
+                        }
+                        .pickerStyle(.segmented)
 
-                switch taskPhase {
-                case .staticBaseline:
-                    Text("El participante sostiene el teléfono a una distancia estable mientras la app reduce el tamaño del optotipo con cada acierto.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                case .dynamicConstantAngularSize:
-                    sliderRow("Tamaño angular objetivo", value: $targetAngularSizeArcMinutes, range: 5...60, unit: "arcmin")
-                    stepperRow("Número de ensayos", value: $dynamicTrialCount, range: 5...60)
-                case .dynamicFixedPhysicalSize:
-                    sliderRow("Tamaño físico fijo", value: $fixedPhysicalSizeMillimeters, range: 1...20, unit: "mm")
-                    stepperRow("Número de ensayos", value: $dynamicTrialCount, range: 5...60)
-                case .blurCrossing:
-                    sliderRow("Tamaño físico del estímulo", value: $fixedPhysicalSizeMillimeters, range: 1...20, unit: "mm")
-                    Text("El participante acerca y aleja el teléfono, marcando el momento en que el estímulo cambia entre claro y borroso. Se registran 3 repeticiones.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                        Toggle("Usa corrección óptica en esta prueba", isOn: $correctionUsed)
+
+                        switch taskPhase {
+                        case .staticBaseline:
+                            EmptyView()
+                        case .dynamicConstantAngularSize:
+                            sliderRow("Tamaño angular objetivo", value: $targetAngularSizeArcMinutes, range: 5...60, unit: "arcmin")
+                            stepperRow("Número de ensayos", value: $dynamicTrialCount, range: 5...60)
+                        case .dynamicFixedPhysicalSize:
+                            sliderRow("Tamaño físico fijo", value: $fixedPhysicalSizeMillimeters, range: 1...20, unit: "mm")
+                            stepperRow("Número de ensayos", value: $dynamicTrialCount, range: 5...60)
+                        case .blurCrossing:
+                            sliderRow("Tamaño físico del estímulo", value: $fixedPhysicalSizeMillimeters, range: 1...20, unit: "mm")
+                        }
+                    }
+                    .padding(.top, 8)
                 }
 
                 Button("Comenzar") {

@@ -3,7 +3,8 @@ import SwiftUI
 /// Pantalla 1 (brief section 6).
 struct HomeView: View {
     @Binding var path: [AppRoute]
-    var startNewSession: () -> Void
+    var onStartNewSession: () -> Void
+    var onStartQuickTestSession: () -> Void
 
     var body: some View {
         ScrollView {
@@ -41,14 +42,24 @@ struct HomeView: View {
 
                 VStack(spacing: 12) {
                     Button {
-                        startNewSession()
-                        path.append(.compatibility)
+                        onStartNewSession()
                     } label: {
                         Label("Nueva sesión", systemImage: "plus.circle.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+
+                    #if DEBUG
+                    Button {
+                        onStartQuickTestSession()
+                    } label: {
+                        Label("Sesión rápida de prueba (dev)", systemImage: "hare.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    #endif
 
                     Button {
                         path.append(.savedSessions)
