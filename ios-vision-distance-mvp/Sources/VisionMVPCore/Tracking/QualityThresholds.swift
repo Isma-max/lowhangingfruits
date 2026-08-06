@@ -3,7 +3,7 @@ import Foundation
 /// Investigator-configurable tolerance for what counts as a valid distance
 /// measurement (brief section 7: "Definir una tolerancia configurable de pose
 /// y calidad").
-public struct QualityThresholds: Equatable, Sendable {
+public struct QualityThresholds: Equatable, Sendable, Codable {
     public var maxYawDegrees: Double
     public var maxPitchDegrees: Double
     public var minDistanceMeters: Double
